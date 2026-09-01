@@ -1,0 +1,38 @@
+{
+  "name": "axis",
+  "version": "0.1.0",
+  "description": "Conversational commerce layer for Nigeria — one chat, many services.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "console": "tsx src/console.ts"
+  },
+  "keywords": [
+    "whatsapp",
+    "commerce",
+    "nigeria",
+    "conversational",
+    "solana"
+  ],
+  "author": "",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@axis/brain": "file:../axis-brain-final",
+    "express": "^4.21.2",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
