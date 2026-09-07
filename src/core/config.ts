@@ -22,6 +22,10 @@ const schema = z.object({
   RECOGNITION_BASE_URL: z.string().optional(),
   RECOGNITION_API_KEY: z.string().optional(),
   RECOGNITION_MODEL: z.string().default("gemini-1.5-flash"),
+  // Exact browser origin allowed to call the web channel (never "*").
+  WEB_ORIGIN: z.string().optional(),
+  // Bearer token guarding /admin/*. Unset => admin routes are denied (fail closed).
+  ADMIN_TOKEN: z.string().optional(),
 });
 
 export type Config = z.infer<typeof schema>;

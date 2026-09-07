@@ -1,4 +1,4 @@
-export type ChannelId = "whatsapp" | "telegram" | "console";
+export type ChannelId = "whatsapp" | "telegram" | "console" | "web";
 export type Vertical = "delivery" | "gifting" | "affiliate" | "unknown";
 export interface InboundMessage {
   channel: ChannelId;

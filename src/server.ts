@@ -5,7 +5,8 @@ import { sessionStore, conversationStore } from "./store/index.js";
 import { createPipeline } from "./router/pipeline.js";
 import { WhatsAppAdapter } from "./channels/whatsapp.js";
 import { TelegramAdapter } from "./channels/telegram.js";
-import type { ChannelId } from "./core/types.js";
+import { WebAdapter, WebInboundError } from "./channels/web.js";
+import type { ChannelId, OutboundMessage } from "./core/types.js";
 const log = childLogger("server");
 
 export function createServer() {
@@ -17,6 +18,26 @@ export function createServer() {
   });
   const whatsapp = new WhatsAppAdapter();
   const telegram = new TelegramAdapter();
+  const web = new WebAdapter();
+
+  // CORS for the browser channel — a single exact origin, never "*". If WEB_ORIGIN
+  // is unset the browser channel simply gets no CORS headers (same-origin only).
+  const webOrigin = cfg.WEB_ORIGIN;
+  app.use((req: Request, res: Response, next) => {
+    const origin = req.get("origin");
+    if (webOrigin && origin === webOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", webOrigin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "content-type,authorization");
+    }
+    if (req.method === "OPTIONS") {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   app.use(
     express.json({
       verify: (req, _res, buf) => {
@@ -73,6 +94,46 @@ export function createServer() {
     } catch (err) {
       log.error({ err }, "error handling Telegram webhook");
     }
+  });
+  app.post("/webhooks/web", async (req: Request, res: Response) => {
+    try {
+      const { messages } = web.parseInbound(req.body);
+      const replies: OutboundMessage[] = [];
+      for (const msg of messages) {
+        const out = await pipeline.process(msg);
+        await web.send(msg.userId, out);
+        replies.push(...out);
+      }
+      res.json({ replies });
+    } catch (err) {
+      if (err instanceof WebInboundError) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
+      log.error({ err }, "error handling web webhook");
+      res.sendStatus(500);
+    }
+  });
+  app.get("/session/web/:userId", async (req: Request, res: Response) => {
+    const userId = String(req.params.userId);
+    const session = await sessionStore.get("web", userId);
+    res.json({
+      vertical: session?.vertical ?? "unknown",
+      step: session?.step ?? "",
+    });
+  });
+
+  // Everything under /admin exposes user identities and full transcripts. Require a
+  // bearer token; if ADMIN_TOKEN is unset, deny all (fail closed) rather than open.
+  app.use("/admin", (req: Request, res: Response, next) => {
+    const token = cfg.ADMIN_TOKEN;
+    const header = req.get("authorization") ?? "";
+    const provided = header.startsWith("Bearer ") ? header.slice(7) : "";
+    if (!token || provided !== token) {
+      res.sendStatus(401);
+      return;
+    }
+    next();
   });
   app.get("/admin/users", async (_req, res) => {
     res.json(await conversationStore.listUsers());
