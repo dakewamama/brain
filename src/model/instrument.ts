@@ -13,6 +13,7 @@ import type {
   ModelMessage,
   ModelProvider,
 } from "./types.js";
+import { isModelError, ModelTransportError } from "./errors.js";
 import { childLogger } from "../core/logger.js";
 
 const log = childLogger("model");
@@ -58,12 +59,25 @@ export async function instrumentedGenerate(
     );
     return result;
   } catch (err) {
-    // Log the kind only; never the message/stack (defense against key leakage).
-    const kind =
-      err && typeof err === "object" && "kind" in err
-        ? (err as { kind: string }).kind
-        : "unknown";
-    log.warn({ conversationId, purpose, kind, conversationCallNo: callNo }, "model.call.error");
+    // Status + provider message are NOT secret (the key is only ever in a
+    // request header, never in a response body or our error text), and they are
+    // essential to diagnose transport failures. Log them; still never the key.
+    const fields: Record<string, unknown> = {
+      conversationId,
+      purpose,
+      conversationCallNo: callNo,
+    };
+    if (err instanceof ModelTransportError) {
+      fields.kind = err.kind;
+      fields.status = err.status;
+      fields.detail = err.message;
+    } else if (isModelError(err)) {
+      fields.kind = err.kind;
+      fields.detail = err.message;
+    } else {
+      fields.kind = "unknown";
+    }
+    log.warn(fields, "model.call.error");
     throw err;
   }
 }
