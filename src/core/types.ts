@@ -72,6 +72,10 @@ export interface SessionState {
   step: string;
   context: Record<string, unknown>;
   savedLocations: GeoLocation[];
+  /** Detected reply language for the whole conversation (a language code from
+   *  SUPPORTED_LANGUAGES). Stored per-conversation, not per message. Undefined
+   *  until first detection, treated as the fallback language. */
+  language?: string;
   updatedAt: number;
 }
 

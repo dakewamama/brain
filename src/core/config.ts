@@ -28,6 +28,15 @@ const schema = z.object({
   GEMINI_MODEL: z.string().default("gemini-1.5-flash"),
   GEMINI_TIMEOUT_MS: z.coerce.number().default(8000),
   GEMINI_MAX_RETRIES: z.coerce.number().default(2),
+  // Language set is CONFIG, not code. "code:Name" pairs; adding a language is an
+  // env change, no code change. FALLBACK is the source language of handler text.
+  SUPPORTED_LANGUAGES: z
+    .string()
+    .default("en:English,pcm:Nigerian Pidgin,yo:Yoruba,ha:Hausa,ig:Igbo"),
+  FALLBACK_LANGUAGE: z.string().default("en"),
+  // A detected language only replaces the conversation's language at or above
+  // this confidence — so one ambiguous message does not flip the reply language.
+  LANGUAGE_SWITCH_MIN_CONFIDENCE: z.coerce.number().default(0.8),
   // Exact browser origin allowed to call the web channel (never "*").
   WEB_ORIGIN: z.string().optional(),
   // Bearer token guarding /admin/*. Unset => admin routes are denied (fail closed).
