@@ -70,7 +70,9 @@ export class GeminiProvider implements ModelProvider {
   private readonly validators = new WeakMap<JsonSchema, ValidateFunction>();
 
   constructor(opts: GeminiOptions) {
-    this.apiKey = opts.apiKey;
+    // Trim defensively: a key pasted with a trailing newline/space would make
+    // every request 401 with an otherwise baffling "invalid key".
+    this.apiKey = opts.apiKey.trim();
     this.defaultModelId = opts.defaultModelId;
     this.timeoutMs = opts.timeoutMs;
     this.maxRetries = opts.maxRetries;
@@ -402,7 +404,18 @@ function mapFinish(reason: string | undefined): FinishReason {
 function toGeminiSchema(schema: JsonSchema): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(schema)) {
-    if (k === "$schema" || k === "$ref" || k === "additionalProperties") continue;
+    // Drop keys Gemini's OpenAPI subset rejects. `enum`/`format` in particular
+    // make the responseSchema 400 on 2.x models; we constrain values with our
+    // own client-side validation + prompt instead.
+    if (
+      k === "$schema" ||
+      k === "$ref" ||
+      k === "additionalProperties" ||
+      k === "enum" ||
+      k === "format"
+    ) {
+      continue;
+    }
     if (k === "type" && typeof v === "string") {
       out.type = v.toUpperCase();
     } else if (k === "properties" && v && typeof v === "object") {
