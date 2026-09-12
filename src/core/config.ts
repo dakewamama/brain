@@ -22,6 +22,12 @@ const schema = z.object({
   RECOGNITION_BASE_URL: z.string().optional(),
   RECOGNITION_API_KEY: z.string().optional(),
   RECOGNITION_MODEL: z.string().default("gemini-1.5-flash"),
+  // Model provider (Gemini). Key is server-only; never a NEXT_PUBLIC_ var, never
+  // logged. Absent key => generate() throws a typed error, no silent fallback.
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default("gemini-1.5-flash"),
+  GEMINI_TIMEOUT_MS: z.coerce.number().default(8000),
+  GEMINI_MAX_RETRIES: z.coerce.number().default(2),
   // Exact browser origin allowed to call the web channel (never "*").
   WEB_ORIGIN: z.string().optional(),
   // Bearer token guarding /admin/*. Unset => admin routes are denied (fail closed).
