@@ -37,6 +37,9 @@ const schema = z.object({
   // A detected language only replaces the conversation's language at or above
   // this confidence — so one ambiguous message does not flip the reply language.
   LANGUAGE_SWITCH_MIN_CONFIDENCE: z.coerce.number().default(0.8),
+  // Durable learning profiles. Set to a mounted volume path (e.g. /data) to keep
+  // per-user learning across redeploys; unset => in-memory (resets on restart).
+  PROFILE_STORE_DIR: z.string().optional(),
   // Exact browser origin allowed to call the web channel (never "*").
   WEB_ORIGIN: z.string().optional(),
   // Bearer token guarding /admin/*. Unset => admin routes are denied (fail closed).

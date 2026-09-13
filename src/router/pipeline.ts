@@ -14,9 +14,11 @@ import { modelProvider } from "../model/index.js";
 import { conversationModelCalls } from "../model/instrument.js";
 import { languages, resolveLanguage } from "../language/index.js";
 import { localizeReplies } from "../language/service.js";
+import { profileStore } from "../store/index.js";
 import {
   understand,
   isSocial,
+  isTransactional,
   type Intent,
   type Understanding,
 } from "../understanding/understand.js";
@@ -76,16 +78,14 @@ export function createPipeline(deps: {
       let switched = false;
       let u: Understanding | null = null;
       if (comprehend) {
+        const recent = (await profileStore.summary(conversationId)) ?? undefined;
         u = await understand(modelProvider, conversationId, msg.text, languages, {
           flow: session
             ? { vertical: session.vertical, step: session.step }
             : undefined,
           userName: msg.userName,
           firstTurn: !session,
-          recent:
-            session && session.vertical !== "unknown"
-              ? `used ${session.vertical}`
-              : undefined,
+          recent,
         });
         if (u) {
           const resolved = resolveLanguage(
@@ -184,6 +184,18 @@ export function createPipeline(deps: {
       if (patch) {
         await sessions.patch(msg.channel, msg.userId, patch);
       }
+
+      // Learn: record what the user actually asked for, so future turns can
+      // recommend it. Best-effort, price-free (names only).
+      if (u && isTransactional(u.intent)) {
+        await profileStore.record(conversationId, {
+          vertical: intentToVertical(u.intent),
+          item: u.item,
+          vendor: u.vendor,
+          at: Date.now(),
+        });
+      }
+
       const finalSession = await sessions.get(msg.channel, msg.userId);
 
       // Localize deterministic (English-authored) replies into the conversation
