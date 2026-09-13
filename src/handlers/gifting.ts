@@ -21,7 +21,7 @@ export class GiftingHandler implements VerticalHandler {
       replies: [
         {
           kind: "text",
-          text: 'Lovely — who are you sending to? Share their name and WhatsApp number (e.g. "Ebele 0803...").',
+          text: 'Lovely. Who are you sending to? Share their name and WhatsApp number (e.g. "Ebele 0803...").',
         },
       ],
       sessionPatch: {
@@ -50,14 +50,14 @@ export class GiftingHandler implements VerticalHandler {
     const name = msg.text.replace(/[\d+\s]{7,}/, "").trim() || "your friend";
     if (!phone) {
       return text(
-        'I need their WhatsApp number too — send it like "Ebele 08031234567".',
+        'I need their WhatsApp number too. Send it like "Ebele 08031234567".',
       );
     }
     return {
       replies: [
         {
           kind: "text",
-          text: `Great — a gift for ${name}. What would you like to send them? (e.g. \"chicken wings from Nadia\")`,
+          text: `Great, a gift for ${name}. What would you like to send them? (e.g. \"chicken wings from Nadia\")`,
         },
       ],
       sessionPatch: {
@@ -72,7 +72,7 @@ export class GiftingHandler implements VerticalHandler {
         {
           kind: "text",
           text:
-            `Got it — ${msg.text.trim()} for ${ctx.recipientName ?? "your friend"}.\n` +
+            `Got it, ${msg.text.trim()} for ${ctx.recipientName ?? "your friend"}.\n` +
             `Next I'll quote delivery to their location and send them a WhatsApp when it's on the way. ` +
             `(This is where gifting plugs into the delivery flow.)`,
         },

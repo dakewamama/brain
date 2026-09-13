@@ -69,7 +69,7 @@ export class DeliveryHandler implements VerticalHandler {
       replies: [
         {
           kind: "text",
-          text: 'Sure — what would you like, and from where? (e.g. "chicken wings from Nadia")',
+          text: 'Sure, what would you like, and from where? (e.g. "chicken wings from Nadia")',
         },
       ],
       sessionPatch: {
@@ -126,7 +126,7 @@ export class DeliveryHandler implements VerticalHandler {
       );
       const alt =
         elsewhere.length > 0
-          ? ` It's available at ${elsewhere[0].vendor.name} though — want that instead?`
+          ? ` It's available at ${elsewhere[0].vendor.name} though. Want that instead?`
           : "";
       return {
         replies: [
@@ -168,7 +168,7 @@ export class DeliveryHandler implements VerticalHandler {
   ): Promise<HandlerResult> {
     if (isNegative(msg.text)) {
       return {
-        replies: [{ kind: "text", text: "No problem — cancelled." }],
+        replies: [{ kind: "text", text: "No problem, cancelled." }],
         sessionPatch: { step: "idle", vertical: "unknown", context: {} },
       };
     }
@@ -213,9 +213,9 @@ export class DeliveryHandler implements VerticalHandler {
           kind: "buttons",
           text:
             `Here's your order:\n` +
-            `• ${cap(ctx.itemName ?? "item")} — ${formatNaira(subtotalKobo)}\n` +
-            `• Delivery${eta} — ${formatNaira(quote.feeKobo)}\n` +
-            `• Service — ${formatNaira(feeKobo)}\n` +
+            `• ${cap(ctx.itemName ?? "item")}: ${formatNaira(subtotalKobo)}\n` +
+            `• Delivery${eta}: ${formatNaira(quote.feeKobo)}\n` +
+            `• Service: ${formatNaira(feeKobo)}\n` +
             `Total: ${formatNaira(totalKobo)}\n\n` +
             `Deliver to: ${loc.address ?? "shared location"}. Confirm?`,
           buttons: [
@@ -240,7 +240,7 @@ export class DeliveryHandler implements VerticalHandler {
   ): Promise<HandlerResult> {
     if (isNegative(msg.text)) {
       return {
-        replies: [{ kind: "text", text: "Cancelled — nothing charged." }],
+        replies: [{ kind: "text", text: "Cancelled, nothing charged." }],
         sessionPatch: { step: "idle", vertical: "unknown", context: {} },
       };
     }
