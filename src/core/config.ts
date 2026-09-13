@@ -28,6 +28,14 @@ const schema = z.object({
   GEMINI_MODEL: z.string().default("gemini-flash-latest"),
   GEMINI_TIMEOUT_MS: z.coerce.number().default(8000),
   GEMINI_MAX_RETRIES: z.coerce.number().default(2),
+  // Alternative: any OpenAI-compatible endpoint (Groq, OpenRouter free models,
+  // DeepSeek, a local server). Set OPENAI_API_KEY (+ base/model) to use it. Which
+  // provider runs is chosen by MODEL_PROVIDER, defaulting to openai when an
+  // OPENAI_API_KEY is present, else gemini.
+  MODEL_PROVIDER: z.enum(["gemini", "openai"]).optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_BASE_URL: z.string().default("https://openrouter.ai/api/v1"),
+  OPENAI_MODEL: z.string().default("deepseek/deepseek-chat-v3-0324:free"),
   // Language set is CONFIG, not code. "code:Name" pairs; adding a language is an
   // env change, no code change. FALLBACK is the source language of handler text.
   SUPPORTED_LANGUAGES: z

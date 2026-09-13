@@ -56,7 +56,7 @@ function build(): LanguageConfig {
     byCode.set(cfg.FALLBACK_LANGUAGE, cfg.FALLBACK_LANGUAGE);
   }
   return {
-    enabled: Boolean(cfg.GEMINI_API_KEY),
+    enabled: Boolean(cfg.GEMINI_API_KEY) || Boolean(cfg.OPENAI_API_KEY),
     fallback: cfg.FALLBACK_LANGUAGE,
     minConfidence: cfg.LANGUAGE_SWITCH_MIN_CONFIDENCE,
     list,
