@@ -72,6 +72,9 @@ export interface Understanding {
    *  the user's language, never containing a price. Rendered as quick-reply
    *  buttons; tapping one sends it back as a normal message. */
   suggestions?: string[];
+  /** Only meaningful mid-flow: true if the message is the answer the assistant is
+   *  currently waiting for; false if it's a question, digression, or new request. */
+  answersFlow?: boolean;
 }
 
 interface FlowContext {
@@ -103,16 +106,20 @@ export async function understand(
       quantity: { type: "number" },
       reply: { type: "string" },
       suggestions: { type: "array", items: { type: "string" } },
+      answersFlow: { type: "boolean" },
     },
     required: ["language", "confidence", "intent"],
     additionalProperties: false,
   };
 
   const codes = langs.list.map((l) => `${l.code} (${l.name})`).join(", ");
-  const flowNote =
-    flow && flow.step !== "idle"
-      ? ` The user is mid-flow (${flow.vertical}, step "${flow.step}"); if the message answers that, keep the same intent.`
-      : "";
+  const midFlow = Boolean(flow && flow.step !== "idle");
+  const flowNote = midFlow
+    ? ` The user is mid-flow (${flow!.vertical}, step "${flow!.step}"). Set ` +
+      `answersFlow=true ONLY if this message is the answer that step is waiting ` +
+      `for; set it false if it's a question, a digression, or a new request. ` +
+      `When answersFlow is false, still give a short helpful reply.`
+    : "";
   const name = userName?.trim();
   const openingNote = firstTurn
     ? name
@@ -128,10 +135,13 @@ export async function understand(
     `food, sending gifts, and shopping online. Nigerian English, Pidgin, Yoruba, ` +
     `Hausa, Igbo and code-switching are all normal, never "unsupported".` +
     `${flowNote}${openingNote}\n\n` +
-    `VOICE: sound like a real person, not a bot. Keep social replies to ONE short ` +
-    `sentence. Address the user by their name when you know it. Do not list the ` +
-    `food/gift/shop options every time and do not repeat yourself. NEVER use a ` +
-    `dash of any kind (no "—", "–", or " - "); use commas or full stops instead.\n\n` +
+    `VOICE: a calm, premium concierge who has it handled, not a chirpy bot. Warm, ` +
+    `confident, effortless. Keep social replies to ONE short sentence; lead with ` +
+    `substance, not filler. Use the user's name naturally now and then, not every ` +
+    `line. Anticipate the next step instead of asking them to repeat themselves. ` +
+    `Never list the food/gift/shop options every time and never repeat an earlier ` +
+    `line. NEVER use a dash of any kind (no "—", "–", or " - "); use commas or ` +
+    `full stops.\n\n` +
     `Return JSON with:\n` +
     `- language: one code from [${codes}] (the language of THIS message; judge ` +
     `how it's written, not the topic; names/prices are not language signals).\n` +
@@ -167,6 +177,11 @@ export async function understand(
         ? j.language
         : langs.fallback;
     const confidence = Math.max(0, Math.min(1, Number(j.confidence ?? 0)));
+    const answersFlow = midFlow ? j.answersFlow === true : undefined;
+    // Trust a reply for social intents, cancel, and mid-flow digressions — all
+    // of which must still never contain an invented number (prompt enforces it).
+    const wantReply =
+      isSocial(intent) || intent === "cancel" || (midFlow && answersFlow === false);
     return {
       language,
       confidence,
@@ -174,9 +189,9 @@ export async function understand(
       vendor: str(j.vendor),
       item: str(j.item),
       quantity: typeof j.quantity === "number" ? j.quantity : undefined,
-      // Only trust a reply for social intents (defends the no-number rule).
-      reply: isSocial(intent) || intent === "cancel" ? str(j.reply) : undefined,
+      reply: wantReply ? str(j.reply) : undefined,
       suggestions: isSocial(intent) ? cleanSuggestions(j.suggestions) : undefined,
+      answersFlow,
     };
   } catch (err) {
     log.warn(

@@ -67,12 +67,14 @@ export function createPipeline(deps: {
       // + an in-language social reply). We skip it for hard commands, mid-flow
       // continuations, and button taps — those are handled deterministically and
       // don't need (or shouldn't spend a call on) comprehension.
+      // Comprehend every fresh text turn — including mid-flow, so a question or
+      // digression during an order gets answered instead of dumping the menu.
+      // Button taps and hard commands stay deterministic.
       const comprehend =
         languages.enabled &&
         Boolean(msg.text.trim()) &&
         !isButtonTap &&
-        !hardCommand &&
-        !inFlow;
+        !hardCommand;
 
       let language = session?.language ?? languages.fallback;
       let switched = false;
@@ -118,6 +120,22 @@ export function createPipeline(deps: {
             ? [{ kind: "text", text: u.reply }]
             : [{ kind: "text", text: "Okay, cleared. What would you like to do?" }];
           alreadyLocalized = Boolean(u.reply);
+        } else if (inFlow && session) {
+          // Mid-flow: answer digressions/questions with the model reply and stay
+          // in the flow; pass real answers on to the active handler.
+          if (!u.answersFlow && u.reply) {
+            replies = [{ kind: "text", text: u.reply }];
+            alreadyLocalized = true;
+          } else {
+            const handler = handlerFor(session.vertical);
+            if (handler) {
+              const result = await handler.handle(msg, session);
+              replies = result.replies;
+              patch = result.sessionPatch;
+            } else {
+              replies = [menuMessage()];
+            }
+          }
         } else if (u.intent === "track") {
           replies = [
             { kind: "text", text: "You don't have an active order to track yet." },

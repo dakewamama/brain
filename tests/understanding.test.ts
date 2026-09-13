@@ -92,6 +92,35 @@ test("unsupported detected language falls back", async () => {
   assert.equal(u.language, languages.fallback);
 });
 
+test("mid-flow: a question is marked as not answering the step, with a reply", async () => {
+  const p = provider(() => ({
+    json: {
+      language: "en",
+      confidence: 0.9,
+      intent: "unknown",
+      answersFlow: false,
+      reply: "I'll show the full cost once you confirm.",
+    },
+  }));
+  const u = await understand(p, "cf1", "how much for delivery", languages, {
+    flow: { vertical: "delivery", step: "awaiting_confirm" },
+  });
+  assert.ok(u);
+  assert.equal(u.answersFlow, false);
+  assert.equal(u.reply, "I'll show the full cost once you confirm.");
+});
+
+test("mid-flow: a real answer is marked as answering the step", async () => {
+  const p = provider(() => ({
+    json: { language: "en", confidence: 0.9, intent: "gift", answersFlow: true },
+  }));
+  const u = await understand(p, "cf2", "Ebele 08031234567", languages, {
+    flow: { vertical: "gifting", step: "awaiting_recipient" },
+  });
+  assert.ok(u);
+  assert.equal(u.answersFlow, true);
+});
+
 test("model failure returns null (pipeline falls back to rules)", async () => {
   const p = provider(() => {
     throw new Error("boom");
