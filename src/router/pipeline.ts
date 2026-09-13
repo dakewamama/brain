@@ -76,13 +76,13 @@ export function createPipeline(deps: {
       let switched = false;
       let u: Understanding | null = null;
       if (comprehend) {
-        u = await understand(
-          modelProvider,
-          conversationId,
-          msg.text,
-          languages,
-          session ? { vertical: session.vertical, step: session.step } : undefined,
-        );
+        u = await understand(modelProvider, conversationId, msg.text, languages, {
+          flow: session
+            ? { vertical: session.vertical, step: session.step }
+            : undefined,
+          userName: msg.userName,
+          firstTurn: !session,
+        });
         if (u) {
           const resolved = resolveLanguage(
             session?.language,
