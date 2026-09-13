@@ -32,7 +32,9 @@ const schema = z.object({
   // DeepSeek, a local server). Set OPENAI_API_KEY (+ base/model) to use it. Which
   // provider runs is chosen by MODEL_PROVIDER, defaulting to openai when an
   // OPENAI_API_KEY is present, else gemini.
-  MODEL_PROVIDER: z.enum(["gemini", "openai"]).optional(),
+  // Ordered, comma-separated provider list for failover, e.g. "openai,gemini"
+  // (try Groq/OpenRouter first, fall back to Gemini). Single value = no failover.
+  MODEL_PROVIDER: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_BASE_URL: z.string().default("https://openrouter.ai/api/v1"),
   OPENAI_MODEL: z.string().default("deepseek/deepseek-chat-v3-0324:free"),

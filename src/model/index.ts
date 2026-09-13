@@ -11,17 +11,14 @@
 import type { ModelProvider } from "./types.js";
 import { GeminiProvider } from "./gemini.js";
 import { OpenAICompatProvider } from "./openai.js";
-import { getConfig } from "../core/config.js";
+import { FallbackProvider } from "./fallback.js";
+import { getConfig, type Config } from "../core/config.js";
 import { childLogger } from "../core/logger.js";
 
 const log = childLogger("model");
 
-export function createModelProvider(): ModelProvider {
-  const cfg = getConfig();
-  const which =
-    cfg.MODEL_PROVIDER ?? (cfg.OPENAI_API_KEY ? "openai" : "gemini");
-  if (which === "openai") {
-    log.info(`Model provider: openai-compatible (${cfg.OPENAI_BASE_URL}).`);
+function buildOne(id: string, cfg: Config): ModelProvider {
+  if (id === "openai") {
     return new OpenAICompatProvider({
       apiKey: cfg.OPENAI_API_KEY ?? "",
       baseUrl: cfg.OPENAI_BASE_URL,
@@ -30,7 +27,6 @@ export function createModelProvider(): ModelProvider {
       maxRetries: cfg.GEMINI_MAX_RETRIES,
     });
   }
-  log.info(`Model provider: gemini (${cfg.GEMINI_MODEL}).`);
   return new GeminiProvider({
     apiKey: cfg.GEMINI_API_KEY ?? "",
     defaultModelId: cfg.GEMINI_MODEL,
@@ -39,12 +35,26 @@ export function createModelProvider(): ModelProvider {
   });
 }
 
+export function createModelProvider(): ModelProvider {
+  const cfg = getConfig();
+  const spec = cfg.MODEL_PROVIDER ?? (cfg.OPENAI_API_KEY ? "openai" : "gemini");
+  const ids = spec
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s === "openai" || s === "gemini");
+  const order = ids.length ? ids : ["gemini"];
+  log.info(`Model provider chain: ${order.join(" -> ")}.`);
+  const providers = order.map((id) => buildOne(id, cfg));
+  return providers.length > 1 ? new FallbackProvider(providers) : providers[0];
+}
+
 export const modelProvider: ModelProvider = createModelProvider();
 
 export { GeminiProvider } from "./gemini.js";
 export type { GeminiOptions } from "./gemini.js";
 export { OpenAICompatProvider } from "./openai.js";
 export type { OpenAIOptions } from "./openai.js";
+export { FallbackProvider } from "./fallback.js";
 
 export type {
   JsonSchema,

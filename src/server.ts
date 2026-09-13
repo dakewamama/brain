@@ -140,10 +140,11 @@ export function createServer() {
   app.get("/admin/model-check", async (req: Request, res: Response) => {
     const model =
       typeof req.query.model === "string" ? req.query.model : undefined;
+    const tokens = Number(req.query.tokens) || 16;
     try {
       const r = await modelProvider.generate(
         [{ role: "user", content: "reply with the word ok" }],
-        { modelId: model, maxOutputTokens: 16, timeoutMs: 15000 },
+        { modelId: model, maxOutputTokens: tokens, timeoutMs: 20000 },
       );
       res.json({
         ok: true,
