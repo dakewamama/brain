@@ -145,6 +145,19 @@ test("valid structured output parses and validates", async () => {
   assert.deepEqual(r.json, { intent: "order" });
 });
 
+test("structured output wrapped in markdown fences is still parsed", async () => {
+  const p = new GeminiProvider({
+    ...base,
+    apiKey: "k",
+    fetchFn: async () =>
+      jsonResponse(textCandidate('```json\n{"intent":"order"}\n```')),
+  });
+  const r = await p.generate([{ role: "user", content: "hi" }], {
+    responseSchema: SCHEMA,
+  });
+  assert.deepEqual(r.json, { intent: "order" });
+});
+
 test("a functionCall maps to a provider-agnostic ToolInvocation", async () => {
   const p = new GeminiProvider({
     ...base,

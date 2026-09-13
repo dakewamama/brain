@@ -45,7 +45,9 @@ export async function detectLanguage(
       conversationId,
       "detect",
       [{ role: "user", content: text }],
-      { system, responseSchema: schema, temperature: 0, maxOutputTokens: 60 },
+      // Generous cap: newer "thinking" models spend tokens before emitting the
+      // (tiny) JSON answer, so a small cap yields empty output.
+      { system, responseSchema: schema, temperature: 0, maxOutputTokens: 512 },
     );
     const j = r.json as { language: string; confidence: number } | undefined;
     if (!j || !langs.has(j.language)) return null;

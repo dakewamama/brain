@@ -300,11 +300,10 @@ export class GeminiProvider implements ModelProvider {
           reason: rawFinish,
         });
       }
-      throw new ModelTransportError("gemini returned no content", {
-        provider: this.id,
-        modelId,
-        status: res.status,
-      });
+      throw new ModelTransportError(
+        `gemini returned no content (finishReason=${rawFinish ?? "none"})`,
+        { provider: this.id, modelId, status: res.status },
+      );
     }
 
     const usage = mapUsage(data.usageMetadata);
@@ -334,7 +333,7 @@ export class GeminiProvider implements ModelProvider {
   ): unknown {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      parsed = JSON.parse(extractJson(text));
     } catch (err) {
       throw new ModelSchemaError("model output was not valid JSON", {
         provider: this.id,
@@ -441,6 +440,21 @@ async function safeErrorDetail(res: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/** Pull a JSON value out of model output that may be wrapped in markdown fences
+ *  or surrounded by prose. Structured-output models sometimes ignore the JSON
+ *  mime type and fence the payload; this recovers it before parsing. */
+export function extractJson(text: string): string {
+  let t = text.trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) t = fence[1].trim();
+  if (t[0] !== "{" && t[0] !== "[") {
+    const start = t.search(/[{[]/);
+    const end = Math.max(t.lastIndexOf("}"), t.lastIndexOf("]"));
+    if (start !== -1 && end > start) t = t.slice(start, end + 1);
+  }
+  return t;
 }
 
 function isAbortError(err: unknown): boolean {
