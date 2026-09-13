@@ -38,7 +38,13 @@ export function createPipeline(deps: {
       const conversationId = `${msg.channel}:${msg.userId}`;
       let language = session?.language ?? languages.fallback;
       let switched = false;
-      if (languages.enabled) {
+      // A button tap (or a location share) carries no language signal, so re-
+      // detecting on it wastes a model call — reuse the established language.
+      const isButtonTap = Boolean(
+        (msg.data as { buttonId?: unknown } | undefined)?.buttonId,
+      );
+      const detectable = Boolean(msg.text.trim()) && !isButtonTap;
+      if (languages.enabled && detectable) {
         const outcome = await applyInboundLanguage(
           modelProvider,
           conversationId,

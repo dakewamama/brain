@@ -62,12 +62,12 @@ export class ModelTransportError extends ModelError {
   ) {
     super(message, ctx);
     this.status = ctx.status;
-    // Retry on 429, any 5xx, and network-level failures (no status). Other 4xx
-    // (bad request, auth) are deterministic client errors — surfaced, not retried.
+    // Retry on 5xx and network-level failures (no status) only. 429 is NOT
+    // retried: against a per-minute quota an immediate retry just burns more of
+    // it (and adds latency to a chat reply); we fail fast to the caller's safe
+    // fallback instead. Other 4xx (bad request, auth) are deterministic.
     this.retryable =
-      ctx.status === undefined ||
-      ctx.status === 429 ||
-      (ctx.status >= 500 && ctx.status <= 599);
+      ctx.status === undefined || (ctx.status >= 500 && ctx.status <= 599);
   }
 }
 

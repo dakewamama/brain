@@ -86,6 +86,28 @@ test("a bad-key HTTP error never leaks the key and is not retried", async () => 
   assert.equal(calls, 1);
 });
 
+test("429 is not retried (protects a per-minute quota)", async () => {
+  let calls = 0;
+  const p = new GeminiProvider({
+    ...base,
+    apiKey: "k",
+    fetchFn: async () => {
+      calls++;
+      return jsonResponse({ error: { message: "quota exceeded" } }, 429);
+    },
+  });
+  await assert.rejects(
+    () => p.generate([{ role: "user", content: "hi" }]),
+    (err: unknown) => {
+      assert.ok(err instanceof ModelTransportError);
+      assert.equal(err.status, 429);
+      assert.equal(err.retryable, false);
+      return true;
+    },
+  );
+  assert.equal(calls, 1, "must not retry a 429");
+});
+
 test("retries on 5xx then succeeds", async () => {
   let calls = 0;
   const p = new GeminiProvider({
