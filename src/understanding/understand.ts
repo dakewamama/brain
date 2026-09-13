@@ -68,6 +68,10 @@ export interface Understanding {
   quantity?: number;
   /** In-language reply for social intents only; empty for transactional. */
   reply?: string;
+  /** 0-3 short, tappable next-action recommendations (social intents only), in
+   *  the user's language, never containing a price. Rendered as quick-reply
+   *  buttons; tapping one sends it back as a normal message. */
+  suggestions?: string[];
 }
 
 interface FlowContext {
@@ -80,9 +84,14 @@ export async function understand(
   conversationId: string,
   text: string,
   langs: LanguageConfig,
-  ctx: { flow?: FlowContext; userName?: string; firstTurn?: boolean } = {},
+  ctx: {
+    flow?: FlowContext;
+    userName?: string;
+    firstTurn?: boolean;
+    recent?: string;
+  } = {},
 ): Promise<Understanding | null> {
-  const { flow, userName, firstTurn } = ctx;
+  const { flow, userName, firstTurn, recent } = ctx;
   const schema: JsonSchema = {
     type: "object",
     properties: {
@@ -93,6 +102,7 @@ export async function understand(
       item: { type: "string" },
       quantity: { type: "number" },
       reply: { type: "string" },
+      suggestions: { type: "array", items: { type: "string" } },
     },
     required: ["language", "confidence", "intent"],
     additionalProperties: false,
@@ -109,6 +119,9 @@ export async function understand(
       ? ` This is the first message. Open by name, short, like "Hey ${name}, what can Axis do for you today?".`
       : ` This is the first message. Open short, like "Hey, what can Axis do for you today?".`
     : ` This is an ongoing chat: do NOT greet again or reintroduce yourself; do not repeat earlier lines; just answer and move it forward.`;
+  const recentNote = recent
+    ? ` For personalized recommendations, the user recently: ${recent}. Prefer suggestions that build on that.`
+    : "";
 
   const system =
     `You are Axis: a warm, brief, street-smart Nigerian concierge for ordering ` +
@@ -127,10 +140,13 @@ export async function understand(
     `- vendor, item, quantity: ONLY for order/gift/shop, extracted from the ` +
     `message; omit what isn't stated.\n` +
     `- reply: ONLY for greet/smalltalk/help/cancel/unknown, following the VOICE ` +
-    `rules, in the user's own language. For order/gift/shop leave reply empty.\n\n` +
+    `rules, in the user's own language. For order/gift/shop leave reply empty.\n` +
+    `- suggestions: ONLY for greet/smalltalk/help/unknown, 2 to 3 SHORT tappable ` +
+    `next actions in the user's language (e.g. "Order jollof", "Send lunch to a ` +
+    `friend", "Shop gadgets"), no prices. Omit for other intents.${recentNote}\n\n` +
     `CRITICAL: never state or invent a price, fee, total, delivery time, or ` +
     `whether an item is in stock; the system provides those. Never put such a ` +
-    `number in reply.`;
+    `number in reply or a suggestion.`;
 
   try {
     const r = await instrumentedGenerate(
@@ -158,6 +174,7 @@ export async function understand(
       quantity: typeof j.quantity === "number" ? j.quantity : undefined,
       // Only trust a reply for social intents (defends the no-number rule).
       reply: isSocial(intent) || intent === "cancel" ? str(j.reply) : undefined,
+      suggestions: isSocial(intent) ? cleanSuggestions(j.suggestions) : undefined,
     };
   } catch (err) {
     log.warn(
@@ -170,4 +187,13 @@ export async function understand(
 
 function str(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
+
+function cleanSuggestions(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out = v
+    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    .map((s) => s.trim().slice(0, 40))
+    .slice(0, 3);
+  return out.length ? out : undefined;
 }

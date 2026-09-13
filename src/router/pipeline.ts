@@ -82,6 +82,10 @@ export function createPipeline(deps: {
             : undefined,
           userName: msg.userName,
           firstTurn: !session,
+          recent:
+            session && session.vertical !== "unknown"
+              ? `used ${session.vertical}`
+              : undefined,
         });
         if (u) {
           const resolved = resolveLanguage(
@@ -119,11 +123,13 @@ export function createPipeline(deps: {
             { kind: "text", text: "You don't have an active order to track yet." },
           ];
         } else if (u.intent === "help") {
-          replies = u.reply ? [{ kind: "text", text: u.reply }] : [helpMessage()];
-          alreadyLocalized = Boolean(u.reply);
+          const s = socialReply(u.reply, u.suggestions, helpMessage());
+          replies = s.replies;
+          alreadyLocalized = s.alreadyLocalized;
         } else if (isSocial(u.intent)) {
-          replies = u.reply ? [{ kind: "text", text: u.reply }] : [menuMessage()];
-          alreadyLocalized = Boolean(u.reply);
+          const s = socialReply(u.reply, u.suggestions, menuMessage());
+          replies = s.replies;
+          alreadyLocalized = s.alreadyLocalized;
         } else {
           // order / gift / shop → the real (catalog-backed) handler.
           const vertical = intentToVertical(u.intent);
@@ -220,6 +226,30 @@ export function createPipeline(deps: {
       return out;
     },
   };
+}
+
+/** Build a social reply, attaching model recommendations as quick-reply buttons
+ *  (id "q:<text>" so a tap is sent back as a normal message). The model wrote it
+ *  in the user's language, so it's already localized. */
+function socialReply(
+  reply: string | undefined,
+  suggestions: string[] | undefined,
+  fallback: OutboundMessage,
+): { replies: OutboundMessage[]; alreadyLocalized: boolean } {
+  if (!reply) return { replies: [fallback], alreadyLocalized: false };
+  if (suggestions && suggestions.length) {
+    return {
+      replies: [
+        {
+          kind: "buttons",
+          text: reply,
+          buttons: suggestions.map((s) => ({ id: `q:${s}`, title: s })),
+        },
+      ],
+      alreadyLocalized: true,
+    };
+  }
+  return { replies: [{ kind: "text", text: reply }], alreadyLocalized: true };
 }
 
 /** Terms that must survive localization byte-identical: merchant/vendor names and

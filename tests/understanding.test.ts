@@ -36,6 +36,7 @@ test("greeting → social intent with an in-language reply", async () => {
       confidence: 0.9,
       intent: "greet",
       reply: "How far! Wetin you wan chop?",
+      suggestions: ["Order jollof", "Send lunch to a friend", "Shop gadgets"],
     },
   }));
   const u = await understand(p, "c1", "wagwan", languages);
@@ -43,6 +44,11 @@ test("greeting → social intent with an in-language reply", async () => {
   assert.equal(u.intent, "greet");
   assert.equal(u.language, "pcm");
   assert.equal(u.reply, "How far! Wetin you wan chop?");
+  assert.deepEqual(u.suggestions, [
+    "Order jollof",
+    "Send lunch to a friend",
+    "Shop gadgets",
+  ]);
 });
 
 test("order → transactional intent, entities kept, reply stripped", async () => {
@@ -65,6 +71,7 @@ test("order → transactional intent, entities kept, reply stripped", async () =
   assert.equal(u.item, "chicken wings");
   assert.equal(u.quantity, 2);
   assert.equal(u.reply, undefined, "no model prose (or price) on transactional turns");
+  assert.equal(u.suggestions, undefined, "no suggestions on transactional turns");
 });
 
 test("unknown/garbage intent value is coerced to 'unknown'", async () => {
