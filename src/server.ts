@@ -137,11 +137,13 @@ export function createServer() {
     next();
   });
   // One live model call to see exactly why comprehension is (or isn't) working.
-  app.get("/admin/model-check", async (_req: Request, res: Response) => {
+  app.get("/admin/model-check", async (req: Request, res: Response) => {
+    const model =
+      typeof req.query.model === "string" ? req.query.model : undefined;
     try {
       const r = await modelProvider.generate(
         [{ role: "user", content: "reply with the word ok" }],
-        { maxOutputTokens: 16, timeoutMs: 15000 },
+        { modelId: model, maxOutputTokens: 16, timeoutMs: 15000 },
       );
       res.json({
         ok: true,
