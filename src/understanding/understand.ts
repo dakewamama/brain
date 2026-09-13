@@ -164,9 +164,9 @@ export async function understand(
       conversationId,
       "understand",
       [{ role: "user", content: text }],
-      // Headroom for reasoning models (e.g. gpt-oss) that spend tokens before
-      // emitting the JSON.
-      { system, responseSchema: schema, temperature: 0.3, maxOutputTokens: 768 },
+      // Generous headroom: reasoning models (e.g. gpt-oss) spend a lot of tokens
+      // thinking before emitting the JSON; too small a cap yields empty output.
+      { system, responseSchema: schema, temperature: 0.3, maxOutputTokens: 2048 },
     );
     const j = (r.json ?? {}) as Partial<Understanding> & { intent?: string };
     const intent = (INTENTS as string[]).includes(j.intent ?? "")
