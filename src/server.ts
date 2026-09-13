@@ -6,6 +6,7 @@ import { createPipeline } from "./router/pipeline.js";
 import { WhatsAppAdapter } from "./channels/whatsapp.js";
 import { TelegramAdapter } from "./channels/telegram.js";
 import { WebAdapter, WebInboundError } from "./channels/web.js";
+import { modelProvider } from "./model/index.js";
 import type { ChannelId, OutboundMessage } from "./core/types.js";
 const log = childLogger("server");
 
@@ -134,6 +135,29 @@ export function createServer() {
       return;
     }
     next();
+  });
+  // One live model call to see exactly why comprehension is (or isn't) working.
+  app.get("/admin/model-check", async (_req: Request, res: Response) => {
+    try {
+      const r = await modelProvider.generate(
+        [{ role: "user", content: "reply with the word ok" }],
+        { maxOutputTokens: 16, timeoutMs: 15000 },
+      );
+      res.json({
+        ok: true,
+        modelId: r.modelId,
+        latencyMs: r.latencyMs,
+        text: r.text.slice(0, 40),
+      });
+    } catch (err) {
+      const e = err as { kind?: string; status?: number; message?: string };
+      res.json({
+        ok: false,
+        kind: e?.kind ?? "unknown",
+        status: e?.status ?? null,
+        detail: String(e?.message ?? err).slice(0, 300),
+      });
+    }
   });
   app.get("/admin/users", async (_req, res) => {
     res.json(await conversationStore.listUsers());
