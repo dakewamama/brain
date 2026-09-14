@@ -76,10 +76,14 @@ test("ambiguous recipient pauses the plan and asks", async () => {
   };
   const result = await exec.run(plan, "u2");
   assert.equal(result.completed, false);
-  assert.match(
-    result.replies[0].kind === "text" ? result.replies[0].text : "",
-    /which one/i,
-  );
+  const reply = result.replies[0];
+  assert.equal(reply.kind, "buttons");
+  if (reply.kind !== "buttons") return;
+  assert.match(reply.text, /which one/i);
+  const titles = reply.buttons.map((b) => b.title);
+  assert.ok(titles.includes("Priya Sharma"));
+  assert.ok(titles.includes("Priya Patel"));
+  assert.ok(reply.buttons.every((b) => b.id.startsWith("q:")));
 });
 
 test("a conversational skill (no execute) is deferred to its flow", async () => {

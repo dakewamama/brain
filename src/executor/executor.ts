@@ -56,7 +56,13 @@ export class Executor {
       // Resolve entity references before the skill sees the params.
       const resolved = await this.resolveParams(step.params, userId);
       if (resolved.clarify) {
-        replies.push({ kind: "text", text: resolved.clarify });
+        // Render candidates as tappable chips (id "q:<name>" so a tap is sent
+        // back as a normal message and re-resolves to the exact person).
+        replies.push({
+          kind: "buttons",
+          text: resolved.clarify.text,
+          buttons: resolved.clarify.options.map((o) => ({ id: `q:${o}`, title: o })),
+        });
         return { replies, completed: false };
       }
 
@@ -78,7 +84,10 @@ export class Executor {
   private async resolveParams(
     params: Record<string, unknown>,
     userId: string,
-  ): Promise<{ params: Record<string, unknown>; clarify?: string }> {
+  ): Promise<{
+    params: Record<string, unknown>;
+    clarify?: { text: string; options: string[] };
+  }> {
     const out: Record<string, unknown> = { ...params };
     for (const [key, value] of Object.entries(params)) {
       if (typeof value !== "string") continue;
@@ -90,10 +99,12 @@ export class Executor {
       if (!kind) continue;
       const r = await this.memory.resolveEntity(userId, kind, value);
       if (r.ambiguous) {
-        const names = r.candidates.map((c) => c.entity.canonicalName).join(", ");
         return {
           params: out,
-          clarify: `I know a few that match "${value}": ${names}. Which one?`,
+          clarify: {
+            text: `I know a few that match "${value}" — which one?`,
+            options: r.candidates.map((c) => c.entity.canonicalName),
+          },
         };
       }
       if (r.match) out[`${key}Entity`] = r.match;
