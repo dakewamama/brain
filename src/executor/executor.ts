@@ -102,7 +102,7 @@ export class Executor {
         return {
           params: out,
           clarify: {
-            text: `I know a few that match "${value}" — which one?`,
+            text: `I know a few that match "${value}". Which one?`,
             options: r.candidates.map((c) => c.entity.canonicalName),
           },
         };

@@ -74,7 +74,7 @@ export class AffiliateHandler implements VerticalHandler {
       replies: [
         {
           kind: "text",
-          text: `Sure — what kind of ${query} are you after? A brand or specific type helps.`,
+          text: `Sure, what kind of ${query} are you after? A brand or specific type helps.`,
         },
       ],
       sessionPatch: {
