@@ -146,7 +146,11 @@ export async function understand(
     `- language: one code from [${codes}] (the language of THIS message; judge ` +
     `how it's written, not the topic; names/prices are not language signals).\n` +
     `- confidence: 0..1 (low if too short/ambiguous).\n` +
-    `- intent: one of ${INTENTS.join(", ")}.\n` +
+    `- intent: one of ${INTENTS.join(", ")}. Meanings: "order" = order FOOD or ` +
+    `drinks from a restaurant/vendor; "shop" = buy a PRODUCT or item online ` +
+    `(electronics, household, stationery like tape, clothes, gadgets); "gift" = ` +
+    `send something to another person; "track" = check an existing order. A ` +
+    `physical product that isn't food is "shop", never "order".\n` +
     `- vendor, item, quantity: ONLY for order/gift/shop, extracted from the ` +
     `message; omit what isn't stated.\n` +
     `- reply: ONLY for greet/smalltalk/help/cancel/unknown, following the VOICE ` +
