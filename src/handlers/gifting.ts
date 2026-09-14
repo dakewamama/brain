@@ -5,6 +5,9 @@ import type {
 } from "../core/types.js";
 import type { VerticalHandler } from "./types.js";
 import { text } from "./types.js";
+import { getMemory } from "../memory/index.js";
+import { childLogger } from "../core/logger.js";
+const log = childLogger("gifting");
 interface GiftContext {
   recipientName?: string;
   recipientPhone?: string;
@@ -45,14 +48,28 @@ export class GiftingHandler implements VerticalHandler {
         return this.start(msg, session);
     }
   }
-  private onRecipient(msg: InboundMessage): HandlerResult {
+  private async onRecipient(msg: InboundMessage): Promise<HandlerResult> {
     const phone = extractPhone(msg.text);
     const name = msg.text.replace(/[\d+\s]{7,}/, "").trim() || "your friend";
+
+    // Memory: if there's no number but we already know this person, use the saved
+    // one instead of asking again.
     if (!phone) {
+      const known = await this.recall(msg.userId, name);
+      if (known) {
+        return this.gotRecipient(known.name, known.phone);
+      }
       return text(
         'I need their WhatsApp number too. Send it like "Ebele 08031234567".',
       );
     }
+
+    // Save the person so next time "send to <name>" just works.
+    await this.remember(msg.userId, name, phone);
+    return this.gotRecipient(name, phone);
+  }
+
+  private gotRecipient(name: string, phone: string): HandlerResult {
     return {
       replies: [
         {
@@ -65,6 +82,40 @@ export class GiftingHandler implements VerticalHandler {
         context: { recipientName: name, recipientPhone: phone },
       },
     };
+  }
+
+  private async recall(
+    userId: string,
+    query: string,
+  ): Promise<{ name: string; phone: string } | null> {
+    try {
+      const r = await getMemory().resolveEntity(userId, "person", query);
+      const phone = r.match?.metadata.phone;
+      if (r.match && typeof phone === "string") {
+        return { name: r.match.canonicalName, phone };
+      }
+    } catch (err) {
+      log.warn({ err: (err as Error).message }, "memory recall failed");
+    }
+    return null;
+  }
+
+  private async remember(
+    userId: string,
+    name: string,
+    phone: string,
+  ): Promise<void> {
+    if (!name || name === "your friend") return;
+    try {
+      await getMemory().upsertEntity({
+        userId,
+        kind: "person",
+        canonicalName: name,
+        metadata: { phone },
+      });
+    } catch (err) {
+      log.warn({ err: (err as Error).message }, "memory save failed");
+    }
   }
   private onItem(msg: InboundMessage, ctx: GiftContext): HandlerResult {
     return {
