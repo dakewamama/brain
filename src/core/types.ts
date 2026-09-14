@@ -42,7 +42,24 @@ export type OutboundMessage =
       text: string;
       url: string;
       label?: string;
+    }
+  | {
+      kind: "products";
+      text: string;
+      products: ProductCard[];
     };
+
+/** A real product found on a vendor: name, price and image as they appear on
+ *  the page. Prices are extracted from the source, never computed by the model —
+ *  if a price isn't clearly on the page, it's omitted rather than invented. */
+export interface ProductCard {
+  title: string;
+  /** Display price exactly as shown on the source page, e.g. "₦12,500". */
+  price?: string;
+  imageUrl?: string;
+  url: string;
+  merchant: string;
+}
 
 export interface ReplyButton {
   id: string;

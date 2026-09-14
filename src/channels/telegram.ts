@@ -109,6 +109,12 @@ export class TelegramAdapter implements ChannelAdapter {
             ),
           },
         };
+      case "products": {
+        const lines = msg.products
+          .map((p) => `• ${p.title}${p.price ? ` — ${p.price}` : ""}\n${p.url}`)
+          .join("\n\n");
+        return { chat_id: chatId, text: `${msg.text}\n\n${lines}` };
+      }
     }
   }
   private async post(

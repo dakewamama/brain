@@ -5,6 +5,7 @@ import type {
 } from "../core/types.js";
 import type { VerticalHandler } from "./types.js";
 import { affiliateProvider } from "../providers/index.js";
+import { browse } from "../browse/serper.js";
 
 const STOPWORDS = [
   "buy",
@@ -86,6 +87,24 @@ export class AffiliateHandler implements VerticalHandler {
   }
 
   private async search(query: string): Promise<HandlerResult> {
+    const done = { step: "idle" as const, vertical: "unknown" as const, context: {} };
+
+    // Live browse: real products with picture and price, when configured.
+    const found = await browse(query);
+    if (found && found.length > 0) {
+      return {
+        replies: [
+          {
+            kind: "products",
+            text: `Here's what I found for "${query}":`,
+            products: found,
+          },
+        ],
+        sessionPatch: done,
+      };
+    }
+
+    // Fallback: category-filtered vendor search links.
     const products = await affiliateProvider.search(query);
     const replies: HandlerResult["replies"] = [
       { kind: "text", text: `Here's where to get "${query}":` },
@@ -93,10 +112,7 @@ export class AffiliateHandler implements VerticalHandler {
     for (const p of products) {
       replies.push({ kind: "link", text: p.title, url: p.url, label: p.merchant });
     }
-    return {
-      replies,
-      sessionPatch: { step: "idle", vertical: "unknown", context: {} },
-    };
+    return { replies, sessionPatch: done };
   }
 }
 

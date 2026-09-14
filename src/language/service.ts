@@ -88,6 +88,10 @@ function collect(replies: OutboundMessage[]): {
             })),
           })),
         } as const;
+      case "products":
+        // Localize only the intro line; product titles, prices, merchants and
+        // URLs are real source data and must pass through byte-identical.
+        return { kind: m.kind, text: put(m.text), products: m.products } as const;
     }
   });
 
@@ -127,6 +131,8 @@ function collect(replies: OutboundMessage[]): {
               })),
             })),
           };
+        case "products":
+          return { kind: "products", text: t[p.text], products: p.products };
       }
     });
   };

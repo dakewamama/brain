@@ -17,6 +17,10 @@ const schema = z.object({
   GLOVO_API_SECRET: z.string().optional(),
   JUMIA_AFFILIATE_TAG: z.string().optional(),
   ORAIMO_AFFILIATE_TAG: z.string().optional(),
+  // Live product browsing. When SERPER_API_KEY is set, shop queries return real
+  // products (title, price, image, link) instead of a search-URL fallback.
+  SERPER_API_KEY: z.string().optional(),
+  SERPER_SHOPPING_URL: z.string().default("https://google.serper.dev/shopping"),
   AXIS_FEE_BPS: z.coerce.number().default(150),
   AXIS_FEE_FLAT_KOBO: z.coerce.number().default(0),
   RECOGNITION_BASE_URL: z.string().optional(),

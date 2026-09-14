@@ -195,6 +195,17 @@ export class WhatsAppAdapter implements ChannelAdapter {
             },
           },
         };
+      case "products": {
+        const lines = msg.products
+          .map((p) => `• ${p.title}${p.price ? ` — ${p.price}` : ""}\n${p.url}`)
+          .join("\n\n");
+        return {
+          messaging_product: "whatsapp",
+          to,
+          type: "text",
+          text: { body: `${msg.text}\n\n${lines}`, preview_url: true },
+        };
+      }
     }
   }
   private async post(payload: Record<string, unknown>): Promise<void> {
