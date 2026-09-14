@@ -96,7 +96,11 @@ export const VENDORS: Vendor[] = [
     name: "Slot",
     kind: "brand",
     categories: ["electronics", "phones", "computing", "accessories"],
-    searchUrl: (q) => `https://slot.ng/?s=${enc(q)}&post_type=product`,
+    // Verified: slot.ng's ?s=&post_type=product query does NOT filter results, so
+    // sending it would surface garbage. Fall back to the homepage until a real
+    // search pattern is confirmed. (The Serper browse path covers Slot's products
+    // via Google Shopping regardless.)
+    searchUrl: () => `https://slot.ng/`,
     areas: ["nationwide"],
   },
   {
