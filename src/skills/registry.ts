@@ -11,7 +11,26 @@
  * let the model pick a skill by description rather than keyword matching.
  */
 import type { JsonSchema, ToolDefinition } from "../model/types.js";
+import type { OutboundMessage } from "../core/types.js";
 import type { VerticalHandler } from "../handlers/types.js";
+import type { MemoryService } from "../memory/service.js";
+
+/** What an atomic skill receives when the Executor runs it. */
+export interface SkillContext {
+  userId: string;
+  memory: MemoryService;
+  /** Outputs of earlier plan steps, by step index. */
+  priorResults: Record<number, unknown>;
+}
+
+/** What an atomic skill returns. */
+export interface SkillOutcome {
+  replies: OutboundMessage[];
+  /** Structured output passed to dependent steps. */
+  data?: unknown;
+  /** True if the skill needs more input before it can finish (pauses the plan). */
+  needsInput?: boolean;
+}
 
 export interface SkillManifest {
   /** Stable id the planner/model selects (baseline skills use the vertical id). */
@@ -24,8 +43,14 @@ export interface SkillManifest {
   parameters: JsonSchema;
   /** Ids/facts that must exist first (e.g. "address_book_entry"). */
   prerequisites?: string[];
-  /** The executor. Baseline skills reuse the existing step-machine handlers. */
-  handler: VerticalHandler;
+  /** Conversational, multi-turn skill (the existing vertical flows). */
+  handler?: VerticalHandler;
+  /** Atomic, planner-driven action (params in, outcome out) — where money skills
+   *  like pay_person live. The Executor resolves entity params, then calls this. */
+  execute?: (
+    params: Record<string, unknown>,
+    ctx: SkillContext,
+  ) => Promise<SkillOutcome>;
   /** Provenance: baseline (shipped) vs learned (added at runtime). */
   origin?: "baseline" | "learned";
 }
