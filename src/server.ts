@@ -7,6 +7,7 @@ import { WhatsAppAdapter } from "./channels/whatsapp.js";
 import { TelegramAdapter } from "./channels/telegram.js";
 import { WebAdapter, WebInboundError } from "./channels/web.js";
 import { modelProvider } from "./model/index.js";
+import { browse, browseEnabled } from "./browse/serper.js";
 import type { ChannelId, OutboundMessage } from "./core/types.js";
 const log = childLogger("server");
 
@@ -160,6 +161,30 @@ export function createServer() {
         status: e?.status ?? null,
         detail: String(e?.message ?? err).slice(0, 300),
       });
+    }
+  });
+  // One live shopping search to confirm SERPER_API_KEY works and see what real
+  // products come back. Returns configured=false (not an error) when no key is
+  // set, so you can tell "not wired" apart from "wired but failing".
+  app.get("/admin/browse-check", async (req: Request, res: Response) => {
+    const q =
+      typeof req.query.q === "string" && req.query.q.trim()
+        ? req.query.q
+        : "oraimo powerbank";
+    if (!browseEnabled()) {
+      res.json({ configured: false, hint: "set SERPER_API_KEY to enable browsing" });
+      return;
+    }
+    try {
+      const products = await browse(q);
+      res.json({
+        configured: true,
+        query: q,
+        count: products?.length ?? 0,
+        products: (products ?? []).slice(0, 5),
+      });
+    } catch (err) {
+      res.json({ configured: true, ok: false, detail: String(err).slice(0, 300) });
     }
   });
   app.get("/admin/users", async (_req, res) => {
