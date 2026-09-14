@@ -56,11 +56,17 @@ export function detectCommand(text: string): GlobalCommand {
   return null;
 }
 
+const PURCHASE_WORDS = ["buy", "want", "need", "get me", "looking for", "order a"];
+
 export function classifyFresh(text: string): Vertical {
   const t = text.toLowerCase();
   if (includesAny(t, GIFTING_WORDS)) return "gifting";
   if (includesAny(t, AFFILIATE_WORDS)) return "affiliate";
   if (includesAny(t, DELIVERY_WORDS)) return "delivery";
+  // Fallback (used when the model is unavailable): a generic "buy/want/need X"
+  // with no food or gift signal is a shopping request, not unknown — route to
+  // affiliate, which asks what kind rather than dumping the menu.
+  if (includesAny(t, PURCHASE_WORDS)) return "affiliate";
   return "unknown";
 }
 
