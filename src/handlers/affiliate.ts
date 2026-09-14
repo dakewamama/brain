@@ -4,8 +4,7 @@ import type {
   HandlerResult,
 } from "../core/types.js";
 import type { VerticalHandler } from "./types.js";
-import { affiliateProvider } from "../providers/index.js";
-import { browse } from "../browse/serper.js";
+import { browse, browseEnabled } from "../browse/serper.js";
 
 const STOPWORDS = [
   "buy",
@@ -89,7 +88,8 @@ export class AffiliateHandler implements VerticalHandler {
   private async search(query: string): Promise<HandlerResult> {
     const done = { step: "idle" as const, vertical: "unknown" as const, context: {} };
 
-    // Live browse: real products with picture and price, when configured.
+    // Live browse: real products with picture and price, shown in-app. Axis never
+    // posts an external link — results live inside the conversation or not at all.
     const found = await browse(query);
     if (found && found.length > 0) {
       return {
@@ -104,15 +104,11 @@ export class AffiliateHandler implements VerticalHandler {
       };
     }
 
-    // Fallback: category-filtered vendor search links.
-    const products = await affiliateProvider.search(query);
-    const replies: HandlerResult["replies"] = [
-      { kind: "text", text: `Here's where to get "${query}":` },
-    ];
-    for (const p of products) {
-      replies.push({ kind: "link", text: p.title, url: p.url, label: p.merchant });
-    }
-    return { replies, sessionPatch: done };
+    // No products and no links. Be honest instead of bouncing the user out.
+    const text = browseEnabled()
+      ? `I couldn't find "${query}" in stock right now. Try a brand or a more specific name.`
+      : "I can't search stores right now. Please try again shortly.";
+    return { replies: [{ kind: "text", text }], sessionPatch: done };
   }
 }
 

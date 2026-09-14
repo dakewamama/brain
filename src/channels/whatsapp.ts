@@ -137,13 +137,6 @@ export class WhatsAppAdapter implements ChannelAdapter {
           type: "text",
           text: { body: msg.text },
         };
-      case "link":
-        return {
-          messaging_product: "whatsapp",
-          to,
-          type: "text",
-          text: { body: `${msg.text}\n${msg.url}`, preview_url: true },
-        };
       case "location_request":
         return {
           messaging_product: "whatsapp",

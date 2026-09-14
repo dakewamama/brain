@@ -61,13 +61,6 @@ function collect(replies: OutboundMessage[]): {
         return { kind: m.kind, text: put(m.text) } as const;
       case "location_request":
         return { kind: m.kind, text: put(m.text) } as const;
-      case "link":
-        return {
-          kind: m.kind,
-          text: put(m.text),
-          label: m.label !== undefined ? put(m.label) : -1,
-          url: m.url,
-        } as const;
       case "buttons":
         return {
           kind: m.kind,
@@ -104,13 +97,6 @@ function collect(replies: OutboundMessage[]): {
           return { kind: "text", text: t[p.text] };
         case "location_request":
           return { kind: "location_request", text: t[p.text] };
-        case "link":
-          return {
-            kind: "link",
-            text: t[p.text],
-            url: p.url,
-            ...(p.label === -1 ? {} : { label: t[p.label] }),
-          };
         case "buttons":
           return {
             kind: "buttons",

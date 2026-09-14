@@ -77,8 +77,6 @@ export class TelegramAdapter implements ChannelAdapter {
     switch (msg.kind) {
       case "text":
         return { chat_id: chatId, text: msg.text };
-      case "link":
-        return { chat_id: chatId, text: `${msg.text}\n${msg.url}` };
       case "location_request":
         return {
           chat_id: chatId,

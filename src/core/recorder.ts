@@ -16,8 +16,6 @@ export function flattenOutbound(msg: OutboundMessage): string {
     }
     case "location_request":
       return `${msg.text} [awaiting location]`;
-    case "link":
-      return `${msg.text} [${msg.label ?? "link"}: ${msg.url}]`;
     case "products": {
       const items = msg.products
         .map((p) => `${p.title}${p.price ? ` (${p.price})` : ""} — ${p.merchant}`)

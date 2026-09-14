@@ -37,7 +37,9 @@ test("full delivery flow reaches order placement", async () => {
   assert.match(r3, /Confirm/i);
   const r4 = await say("yes");
   assert.match(r4, /Order placed/i);
-  assert.match(r4, /Track order/i);
+  // Tracking is in-app (order ID + updates), never an external link.
+  assert.match(r4, /order ID/i);
+  assert.doesNotMatch(r4, /https?:\/\//);
 });
 test("out-of-stock item is refused, not ordered", async () => {
   const { say } = freshPipeline();
@@ -45,17 +47,12 @@ test("out-of-stock item is refused, not ordered", async () => {
   assert.match(r, /out of stock/i);
   assert.doesNotMatch(r, /Total:/);
 });
-test("affiliate query only surfaces vendors that stock the category", async () => {
+test("a shop query never returns a direct link", async () => {
   const { say } = freshPipeline();
-  // A power/audio query goes to Oraimo, not to every vendor in the list.
+  // With no browse key configured, Axis is honest rather than bouncing the user
+  // out to an external store — and never emits a URL.
   const r = await say("buy an oraimo powerbank");
-  assert.match(r, /oraimo/i);
-});
-test("a grocery query never surfaces an electronics-only vendor", async () => {
-  const { say } = freshPipeline();
-  const r = await say("who has fruits");
-  // Oraimo sells power banks and earbuds, nothing edible.
-  assert.doesNotMatch(r, /oraimo/i);
+  assert.doesNotMatch(r, /https?:\/\//);
 });
 test("cancel mid-flow clears the session", async () => {
   const { say } = freshPipeline();

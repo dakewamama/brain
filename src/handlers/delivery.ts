@@ -277,14 +277,10 @@ export class DeliveryHandler implements VerticalHandler {
         text: `Order placed! 🎉 ${cap(ctx.itemName ?? "your order")} from ${vendor.name} is on the way.`,
       },
     ];
-    if (order.trackingUrl) {
-      replies.push({
-        kind: "link",
-        text: "Track your order here:",
-        url: order.trackingUrl,
-        label: "Track order",
-      });
-    }
+    replies.push({
+      kind: "text",
+      text: `Your order ID is ${order.orderId}. I'll keep you posted here as it moves.`,
+    });
     return {
       replies,
       sessionPatch: {

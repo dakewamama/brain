@@ -38,12 +38,6 @@ export type OutboundMessage =
       text: string;
     }
   | {
-      kind: "link";
-      text: string;
-      url: string;
-      label?: string;
-    }
-  | {
       kind: "products";
       text: string;
       products: ProductCard[];
