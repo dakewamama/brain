@@ -1,40 +1,40 @@
 import type { AffiliateProvider, AffiliateProduct } from "./types.js";
 import { getConfig } from "../core/config.js";
+import { VENDORS, vendorsFor, type Vendor } from "../data/vendors.js";
 
 export class SimpleAffiliateProvider implements AffiliateProvider {
   readonly name = "affiliate";
-  private jumiaTag?: string;
-  private oraimoTag?: string;
+  private tags: Partial<Record<string, string | undefined>>;
   constructor() {
     const cfg = getConfig();
-    this.jumiaTag = cfg.JUMIA_AFFILIATE_TAG;
-    this.oraimoTag = cfg.ORAIMO_AFFILIATE_TAG;
+    this.tags = {
+      JUMIA_AFFILIATE_TAG: cfg.JUMIA_AFFILIATE_TAG,
+      ORAIMO_AFFILIATE_TAG: cfg.ORAIMO_AFFILIATE_TAG,
+    };
   }
+
+  // Only vendors that can actually stock the query. "who has fruits" no longer
+  // reaches Oraimo, because Oraimo has no groceries category.
   async search(query: string): Promise<AffiliateProduct[]> {
-    const q = encodeURIComponent(query.trim());
-    const results: AffiliateProduct[] = [];
-    results.push({
-      title: `Search Jumia for "${query}"`,
-      url: this.tag(`https://www.jumia.com.ng/catalog/?q=${q}`),
-      merchant: "Jumia",
-    });
-    results.push({
-      title: `Search Oraimo for "${query}"`,
-      url: this.tagOraimo(`https://ng.oraimo.com/catalogsearch/result/?q=${q}`),
-      merchant: "Oraimo",
-    });
-    return results;
+    return vendorsFor(query).map((v) => ({
+      title: `Search ${v.name} for "${query}"`,
+      url: this.tagUrl(v, v.searchUrl(query)),
+      merchant: v.name,
+    }));
   }
+
+  private tagUrl(v: Vendor, url: string): string {
+    const tag = v.tagConfig ? this.tags[v.tagConfig] : undefined;
+    if (!tag) return url;
+    const u = new URL(url);
+    u.searchParams.set("aff", tag);
+    return u.toString();
+  }
+
+  // Kept for the AffiliateProvider interface (callers that hand us a finished
+  // URL); applies the Jumia tag by default.
   tag(url: string): string {
-    if (!this.jumiaTag) return url;
-    const u = new URL(url);
-    u.searchParams.set("aff", this.jumiaTag);
-    return u.toString();
-  }
-  private tagOraimo(url: string): string {
-    if (!this.oraimoTag) return url;
-    const u = new URL(url);
-    u.searchParams.set("aff", this.oraimoTag);
-    return u.toString();
+    const jumia = VENDORS.find((v) => v.id === "jumia");
+    return jumia ? this.tagUrl(jumia, url) : url;
   }
 }

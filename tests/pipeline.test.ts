@@ -45,11 +45,17 @@ test("out-of-stock item is refused, not ordered", async () => {
   assert.match(r, /out of stock/i);
   assert.doesNotMatch(r, /Total:/);
 });
-test("affiliate query returns tracked links", async () => {
+test("affiliate query only surfaces vendors that stock the category", async () => {
   const { say } = freshPipeline();
+  // A power/audio query goes to Oraimo, not to every vendor in the list.
   const r = await say("buy an oraimo powerbank");
-  assert.match(r, /jumia/i);
   assert.match(r, /oraimo/i);
+});
+test("a grocery query never surfaces an electronics-only vendor", async () => {
+  const { say } = freshPipeline();
+  const r = await say("who has fruits");
+  // Oraimo sells power banks and earbuds, nothing edible.
+  assert.doesNotMatch(r, /oraimo/i);
 });
 test("cancel mid-flow clears the session", async () => {
   const { say } = freshPipeline();
