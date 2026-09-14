@@ -50,6 +50,8 @@ const schema = z.object({
   // Durable learning profiles. Set to a mounted volume path (e.g. /data) to keep
   // per-user learning across redeploys; unset => in-memory (resets on restart).
   PROFILE_STORE_DIR: z.string().optional(),
+  // Postgres (+ pgvector) for the memory substrate. Unset => in-memory memory.
+  DATABASE_URL: z.string().optional(),
   // Exact browser origin allowed to call the web channel (never "*").
   WEB_ORIGIN: z.string().optional(),
   // Bearer token guarding /admin/*. Unset => admin routes are denied (fail closed).
