@@ -6,7 +6,7 @@ import type { VerticalHandler } from "../src/handlers/types.js";
 import type { HandlerResult } from "../src/core/types.js";
 
 test("baseline commerce skills are registered", () => {
-  for (const id of ["delivery", "gifting", "affiliate"]) {
+  for (const id of ["delivery", "affiliate"]) {
     assert.ok(skills.has(id), `${id} should be registered`);
     assert.ok(skills.handlerFor(id), `${id} should resolve a handler`);
   }

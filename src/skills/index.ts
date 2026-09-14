@@ -6,7 +6,6 @@
  */
 import { SkillRegistry } from "./registry.js";
 import { DeliveryHandler } from "../handlers/delivery.js";
-import { GiftingHandler } from "../handlers/gifting.js";
 import { AffiliateHandler } from "../handlers/affiliate.js";
 import { payPersonSkill, saveAddressSkill } from "./payments.js";
 
@@ -30,21 +29,6 @@ skills.register({
     },
   },
   handler: new DeliveryHandler(),
-});
-
-skills.register({
-  id: "gifting",
-  name: "Send a gift",
-  description:
-    "Send a gift or food to someone else, e.g. 'send lunch to Ebele'.",
-  parameters: {
-    type: "object",
-    properties: {
-      recipient: { type: "string" },
-      item: { type: "string" },
-    },
-  },
-  handler: new GiftingHandler(),
 });
 
 skills.register({

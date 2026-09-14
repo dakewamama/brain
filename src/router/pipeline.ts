@@ -37,8 +37,6 @@ function intentToVertical(intent: Intent): Vertical {
   switch (intent) {
     case "order":
       return "delivery";
-    case "gift":
-      return "gifting";
     case "shop":
       return "affiliate";
     default:

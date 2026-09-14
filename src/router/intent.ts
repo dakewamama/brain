@@ -28,7 +28,6 @@ const DELIVERY_WORDS = [
   "pick up",
   "dispatch",
 ];
-const GIFTING_WORDS = ["gift", "gifting", "surprise", "treat", "send lunch"];
 const AFFILIATE_WORDS = [
   "buy",
   "phone",
@@ -60,7 +59,6 @@ const PURCHASE_WORDS = ["buy", "want", "need", "get me", "looking for", "order a
 
 export function classifyFresh(text: string): Vertical {
   const t = text.toLowerCase();
-  if (includesAny(t, GIFTING_WORDS)) return "gifting";
   if (includesAny(t, AFFILIATE_WORDS)) return "affiliate";
   if (includesAny(t, DELIVERY_WORDS)) return "delivery";
   // Fallback (used when the model is unavailable): a generic "buy/want/need X"

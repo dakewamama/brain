@@ -27,7 +27,6 @@ export type Intent =
   | "help"
   | "cancel"
   | "order"
-  | "gift"
   | "shop"
   | "track"
   | "unknown";
@@ -38,7 +37,6 @@ const INTENTS: Intent[] = [
   "help",
   "cancel",
   "order",
-  "gift",
   "shop",
   "track",
   "unknown",
@@ -56,7 +54,7 @@ export function isSocial(intent: Intent): boolean {
 }
 
 export function isTransactional(intent: Intent): boolean {
-  return intent === "order" || intent === "gift" || intent === "shop";
+  return intent === "order" || intent === "shop";
 }
 
 export interface Understanding {
@@ -139,7 +137,7 @@ export async function understand(
     `confident, effortless. Keep social replies to ONE short sentence; lead with ` +
     `substance, not filler. Use the user's name naturally now and then, not every ` +
     `line. Anticipate the next step instead of asking them to repeat themselves. ` +
-    `Never list the food/gift/shop options every time and never repeat an earlier ` +
+    `Never list the food/shopping options every time and never repeat an earlier ` +
     `line. NEVER use a dash of any kind (no "—", "–", or " - "); use commas or ` +
     `full stops.\n\n` +
     `Return JSON with:\n` +
@@ -148,16 +146,16 @@ export async function understand(
     `- confidence: 0..1 (low if too short/ambiguous).\n` +
     `- intent: one of ${INTENTS.join(", ")}. Meanings: "order" = order FOOD or ` +
     `drinks from a restaurant/vendor; "shop" = buy a PRODUCT or item online ` +
-    `(electronics, household, stationery like tape, clothes, gadgets); "gift" = ` +
-    `send something to another person; "track" = check an existing order. A ` +
-    `physical product that isn't food is "shop", never "order".\n` +
-    `- vendor, item, quantity: ONLY for order/gift/shop, extracted from the ` +
+    `(electronics, household, stationery like tape, clothes, gadgets); "track" = ` +
+    `check an existing order. A physical product that isn't food is "shop", ` +
+    `never "order".\n` +
+    `- vendor, item, quantity: ONLY for order/shop, extracted from the ` +
     `message; omit what isn't stated.\n` +
     `- reply: ONLY for greet/smalltalk/help/cancel/unknown, following the VOICE ` +
-    `rules, in the user's own language. For order/gift/shop leave reply empty.\n` +
+    `rules, in the user's own language. For order/shop leave reply empty.\n` +
     `- suggestions: ONLY for greet/smalltalk/help/unknown, 2 to 3 SHORT tappable ` +
-    `next actions in the user's language (e.g. "Order jollof", "Send lunch to a ` +
-    `friend", "Shop gadgets"), no prices. Omit for other intents.${recentNote}\n\n` +
+    `next actions in the user's language (e.g. "Order jollof", "Buy a powerbank", ` +
+    `"Find a charger"), no prices. Omit for other intents.${recentNote}\n\n` +
     `CRITICAL: never state or invent a price, fee, total, delivery time, or ` +
     `whether an item is in stock; the system provides those. Never put such a ` +
     `number in reply or a suggestion.`;
