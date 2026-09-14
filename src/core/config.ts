@@ -52,6 +52,12 @@ const schema = z.object({
   PROFILE_STORE_DIR: z.string().optional(),
   // Postgres (+ pgvector) for the memory substrate. Unset => in-memory memory.
   DATABASE_URL: z.string().optional(),
+  // MCP servers to auto-register as skills, as a JSON array:
+  // [{"name":"chowdeck","command":"npx","args":["-y","@thathman/chowdeck-mcp"]}].
+  // Child processes inherit brain's env, so put secrets in normal env vars.
+  MCP_SERVERS: z.string().optional(),
+  // The onboarding service base URL (custody + Paj off-ramp) for money skills.
+  ONBOARDING_URL: z.string().optional(),
   // Exact browser origin allowed to call the web channel (never "*").
   WEB_ORIGIN: z.string().optional(),
   // Bearer token guarding /admin/*. Unset => admin routes are denied (fail closed).
