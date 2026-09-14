@@ -8,8 +8,13 @@ import { SkillRegistry } from "./registry.js";
 import { DeliveryHandler } from "../handlers/delivery.js";
 import { GiftingHandler } from "../handlers/gifting.js";
 import { AffiliateHandler } from "../handlers/affiliate.js";
+import { payPersonSkill, saveAddressSkill } from "./payments.js";
 
 export const skills = new SkillRegistry();
+
+// Atomic money skills (deterministic; call onboarding for custody + off-ramp).
+skills.register(saveAddressSkill);
+skills.register(payPersonSkill);
 
 skills.register({
   id: "delivery",

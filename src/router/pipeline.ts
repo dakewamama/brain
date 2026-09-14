@@ -15,6 +15,11 @@ import { conversationModelCalls } from "../model/instrument.js";
 import { languages, resolveLanguage } from "../language/index.js";
 import { localizeReplies } from "../language/service.js";
 import { profileStore } from "../store/index.js";
+import { getConfig } from "../core/config.js";
+import { skills } from "../skills/index.js";
+import { plan } from "../planner/planner.js";
+import { Executor } from "../executor/executor.js";
+import { getMemory } from "../memory/index.js";
 import {
   understand,
   isSocial,
@@ -63,6 +68,51 @@ export function createPipeline(deps: {
       const isButtonTap = Boolean(
         (msg.data as { buttonId?: unknown } | undefined)?.buttonId,
       );
+
+      // Opt-in runtime (AGENT_RUNTIME): Planner -> Executor for fresh turns. It
+      // wins only for atomic skills (e.g. pay_person); an empty plan or a
+      // conversational skill falls through to the proven understand->dispatch
+      // path below, so this is safe to leave off by default.
+      if (
+        getConfig().AGENT_RUNTIME &&
+        languages.enabled &&
+        Boolean(msg.text.trim()) &&
+        !isButtonTap &&
+        !hardCommand &&
+        !inFlow
+      ) {
+        const p = await plan(modelProvider, conversationId, msg.text, skills);
+        if (p.steps.length > 0) {
+          const exec = await new Executor(skills, getMemory()).run(p, msg.userId);
+          if (!exec.deferred) {
+            let out = exec.replies;
+            const lang = session?.language ?? languages.fallback;
+            if (languages.enabled && lang !== languages.fallback) {
+              out = await localizeReplies(
+                modelProvider,
+                conversationId,
+                out,
+                lang,
+                languages,
+                collectProtectedTerms(session),
+              );
+            }
+            for (const reply of out) {
+              await recordOutbound(conversations, msg.channel, msg.userId, reply, {
+                vertical: session?.vertical,
+                step: session?.step,
+              });
+            }
+            log.info(
+              { conversationId, runtime: true, steps: p.steps.length, completed: exec.completed },
+              "pipeline.turn",
+            );
+            return out;
+          }
+          // deferred (a conversational skill) -> fall through to normal dispatch
+        }
+      }
+
       // One model call comprehends fresh text turns (language + intent + entities
       // + an in-language social reply). We skip it for hard commands, mid-flow
       // continuations, and button taps — those are handled deterministically and

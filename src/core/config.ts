@@ -56,8 +56,13 @@ const schema = z.object({
   // [{"name":"chowdeck","command":"npx","args":["-y","@thathman/chowdeck-mcp"]}].
   // Child processes inherit brain's env, so put secrets in normal env vars.
   MCP_SERVERS: z.string().optional(),
-  // The onboarding service base URL (custody + Paj off-ramp) for money skills.
+  // The onboarding service base URL (custody + Paj off-ramp) for money skills,
+  // and the shared token that authenticates brain -> onboarding calls.
   ONBOARDING_URL: z.string().optional(),
+  INTERNAL_API_TOKEN: z.string().optional(),
+  // Opt-in: run the Planner -> Executor runtime for fresh turns. Off by default;
+  // when off, the proven understand -> dispatch flow is used unchanged.
+  AGENT_RUNTIME: z.coerce.boolean().default(false),
   // Exact browser origin allowed to call the web channel (never "*").
   WEB_ORIGIN: z.string().optional(),
   // Bearer token guarding /admin/*. Unset => admin routes are denied (fail closed).
