@@ -8,6 +8,7 @@ import { TelegramAdapter } from "./channels/telegram.js";
 import { WebAdapter, WebInboundError } from "./channels/web.js";
 import { modelProvider } from "./model/index.js";
 import { browse, browseEnabled } from "./browse/serper.js";
+import { secretOk, bearer } from "./router/webhookAuth.js";
 import type { ChannelId, OutboundMessage } from "./core/types.js";
 const log = childLogger("server");
 
@@ -21,6 +22,15 @@ export function createServer() {
   const whatsapp = new WhatsAppAdapter();
   const telegram = new TelegramAdapter();
   const web = new WebAdapter();
+
+  // Warn once at boot if a public webhook is unauthenticated. Enforcement is
+  // per-request below; this makes an unset token loud instead of silent.
+  if (!cfg.WEB_WEBHOOK_TOKEN) {
+    log.warn("WEB_WEBHOOK_TOKEN unset; POST /webhooks/web is unauthenticated");
+  }
+  if (telegram.live && !cfg.TELEGRAM_WEBHOOK_SECRET) {
+    log.warn("TELEGRAM_WEBHOOK_SECRET unset; Telegram webhook is unverified");
+  }
 
   // CORS for the browser channel — a single exact origin, never "*". If WEB_ORIGIN
   // is unset the browser channel simply gets no CORS headers (same-origin only).
@@ -86,6 +96,15 @@ export function createServer() {
     }
   });
   app.post("/webhooks/telegram", async (req: Request, res: Response) => {
+    // Telegram echoes the secret_token set at webhook registration. When we've
+    // configured one, reject anything that doesn't present it.
+    if (cfg.TELEGRAM_WEBHOOK_SECRET) {
+      const provided = req.get("x-telegram-bot-api-secret-token");
+      if (!secretOk(provided, cfg.TELEGRAM_WEBHOOK_SECRET)) {
+        res.sendStatus(401);
+        return;
+      }
+    }
     res.sendStatus(200);
     try {
       const { messages } = telegram.parseInbound(req.body);
@@ -98,6 +117,14 @@ export function createServer() {
     }
   });
   app.post("/webhooks/web", async (req: Request, res: Response) => {
+    // The browser never calls this directly — our same-origin proxy does, holding
+    // the token server-side. Enforce it when configured. (CORS is not security.)
+    if (cfg.WEB_WEBHOOK_TOKEN) {
+      if (!secretOk(bearer(req.get("authorization")), cfg.WEB_WEBHOOK_TOKEN)) {
+        res.sendStatus(401);
+        return;
+      }
+    }
     try {
       const { messages } = web.parseInbound(req.body);
       const replies: OutboundMessage[] = [];

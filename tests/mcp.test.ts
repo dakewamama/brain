@@ -4,7 +4,51 @@ import {
   parseMcpServers,
   toSkill,
   mcpResultToOutcome,
+  childEnv,
+  sanitizeMcpText,
 } from "../src/mcp/bootstrap.js";
+
+test("childEnv: never leaks parent secrets (P0 item 5)", () => {
+  const parent = {
+    PATH: "/usr/bin",
+    HOME: "/home/u",
+    PAJ_API_KEY: "secret-paj",
+    INTERNAL_API_TOKEN: "secret-token",
+  } as NodeJS.ProcessEnv;
+  const env = childEnv({ name: "x", command: "npx" }, parent);
+  assert.equal(env.PATH, "/usr/bin");
+  assert.equal(env.HOME, "/home/u");
+  assert.equal(env.PAJ_API_KEY, undefined);
+  assert.equal(env.INTERNAL_API_TOKEN, undefined);
+});
+
+test("childEnv: forwards only opted-in vars + declared values", () => {
+  const parent = {
+    PATH: "/usr/bin",
+    CHOWDECK_TOKEN: "abc",
+    OTHER_SECRET: "nope",
+  } as NodeJS.ProcessEnv;
+  const env = childEnv(
+    { name: "x", command: "npx", passEnv: ["CHOWDECK_TOKEN"], env: { EXTRA: "1" } },
+    parent,
+  );
+  assert.equal(env.CHOWDECK_TOKEN, "abc");
+  assert.equal(env.EXTRA, "1");
+  assert.equal(env.OTHER_SECRET, undefined);
+});
+
+test("sanitizeMcpText: strips URLs so MCP output can't inject links (P0 item 6)", () => {
+  const out = sanitizeMcpText("Deal: https://evil.example/x and www.evil.com now");
+  assert.doesNotMatch(out, /https?:\/\//);
+  assert.doesNotMatch(out, /www\./);
+  assert.match(out, /\[link removed\]/);
+});
+
+test("sanitizeMcpText: caps length and strips control chars", () => {
+  const out = sanitizeMcpText("a" + String.fromCharCode(7) + "b" + "x".repeat(5000));
+  assert.ok(out.length <= 2000);
+  assert.doesNotMatch(out, /[\x00-\x1f]/);
+});
 
 test("parseMcpServers: valid JSON array of servers", () => {
   const servers = parseMcpServers(

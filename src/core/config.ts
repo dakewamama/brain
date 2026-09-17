@@ -68,6 +68,11 @@ const schema = z.object({
   WEB_ORIGIN: z.string().optional(),
   // Bearer token guarding /admin/*. Unset => admin routes are denied (fail closed).
   ADMIN_TOKEN: z.string().optional(),
+  // Bearer token the web proxy must send on POST /webhooks/web. Enforced when set.
+  WEB_WEBHOOK_TOKEN: z.string().optional(),
+  // Telegram's secret_token, echoed back in x-telegram-bot-api-secret-token.
+  // Enforced when set.
+  TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
 });
 
 export type Config = z.infer<typeof schema>;
