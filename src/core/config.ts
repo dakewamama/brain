@@ -64,9 +64,6 @@ const schema = z.object({
   // and the shared token that authenticates brain -> onboarding calls.
   ONBOARDING_URL: z.string().optional(),
   INTERNAL_API_TOKEN: z.string().optional(),
-  // Opt-in: run the Planner -> Executor runtime for fresh turns. Off by default;
-  // when off, the proven understand -> dispatch flow is used unchanged.
-  AGENT_RUNTIME: z.coerce.boolean().default(false),
   // Exact browser origin allowed to call the web channel (never "*").
   WEB_ORIGIN: z.string().optional(),
   // Bearer token guarding /admin/*. Unset => admin routes are denied (fail closed).

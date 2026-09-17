@@ -1,9 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { plan } from "../src/planner/planner.js";
-import { SkillRegistry } from "../src/skills/registry.js";
-import type { VerticalHandler } from "../src/handlers/types.js";
-import type { HandlerResult } from "../src/core/types.js";
+import { SkillRegistry, type SkillOutcome } from "../src/skills/registry.js";
 import type {
   GenerateResult,
   ModelMessage,
@@ -11,25 +9,17 @@ import type {
   GenerateOptions,
 } from "../src/model/types.js";
 
-const stub: VerticalHandler = {
-  vertical: "unknown",
-  async start(): Promise<HandlerResult> {
-    return { replies: [] };
-  },
-  async handle(): Promise<HandlerResult> {
-    return { replies: [] };
-  },
-};
-
 function registry(): SkillRegistry {
   const r = new SkillRegistry();
-  for (const id of ["pay_person", "delivery"]) {
+  for (const id of ["pay_person", "buy_airtime"]) {
     r.register({
       id,
       name: id,
       description: `does ${id}`,
       parameters: { type: "object" },
-      handler: stub,
+      async execute(): Promise<SkillOutcome> {
+        return { replies: [] };
+      },
     });
   }
   return r;
@@ -60,7 +50,7 @@ test("decomposes a compound request into ordered steps", async () => {
     json: {
       steps: [
         { skill: "pay_person", params: { amount: 20000, recipient: "mum" }, dependsOn: [] },
-        { skill: "delivery", params: { item: "jollof" }, dependsOn: [] },
+        { skill: "buy_airtime", params: { item: "jollof" }, dependsOn: [] },
       ],
     },
   }));
@@ -68,7 +58,7 @@ test("decomposes a compound request into ordered steps", async () => {
   assert.equal(result.steps.length, 2);
   assert.equal(result.steps[0].skill, "pay_person");
   assert.equal(result.steps[0].params.amount, 20000);
-  assert.equal(result.steps[1].skill, "delivery");
+  assert.equal(result.steps[1].skill, "buy_airtime");
 });
 
 test("drops steps that reference unknown skills", async () => {
@@ -76,13 +66,13 @@ test("drops steps that reference unknown skills", async () => {
     json: {
       steps: [
         { skill: "book_flight", params: {}, dependsOn: [] },
-        { skill: "delivery", params: {}, dependsOn: [] },
+        { skill: "buy_airtime", params: {}, dependsOn: [] },
       ],
     },
   }));
   const result = await plan(p, "c2", "book a flight and order food", registry());
   assert.equal(result.steps.length, 1);
-  assert.equal(result.steps[0].skill, "delivery");
+  assert.equal(result.steps[0].skill, "buy_airtime");
 });
 
 test("a greeting yields an empty plan", async () => {

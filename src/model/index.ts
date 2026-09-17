@@ -1,12 +1,11 @@
 /**
  * Public surface of the model provider layer.
  *
- * `modelProvider` is the process-wide provider, selected from config exactly like
- * `providers/index.ts` and `recognition/index.ts`. Today that is Gemini. Adding a
- * second provider means implementing `ModelProvider` and switching here — callers
- * never change. There is no rules/string fallback in this layer: a missing key or
- * a bad response surfaces as a typed error (the recognizer keeps its own separate
- * rules fallback).
+ * `modelProvider` is the process-wide provider, selected from config. Today that
+ * is Gemini. Adding a second provider means implementing `ModelProvider` and
+ * switching here — callers never change. There is no rules/string fallback in
+ * this layer: a missing key or a bad response surfaces as a typed error, which
+ * the planner catches and turns into an empty plan.
  */
 import type { ModelProvider } from "./types.js";
 import { GeminiProvider } from "./gemini.js";

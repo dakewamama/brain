@@ -2,17 +2,16 @@
  * Skill Registry — the nervous system of the agent.
  *
  * A skill is a self-contained, discoverable capability with metadata the model
- * can reason over, plus a handler that executes it. The registry replaces a
- * hardcoded switch with a plug-in architecture: baseline skills are registered at
- * boot, and new ones can be registered at RUNTIME (this is the seam the Learner
- * agent uses to add capabilities without a restart).
+ * can reason over, plus a deterministic `execute()` that performs it. The registry
+ * replaces a hardcoded switch with a plug-in architecture: baseline skills are
+ * registered at boot, and new ones can be registered at RUNTIME (this is the seam
+ * the Learner agent uses to add capabilities without a restart).
  *
  * `listForLLM()` returns provider-agnostic tool definitions so the planner can
  * let the model pick a skill by description rather than keyword matching.
  */
 import type { JsonSchema, ToolDefinition } from "../model/types.js";
 import type { OutboundMessage } from "../core/types.js";
-import type { VerticalHandler } from "../handlers/types.js";
 import type { MemoryService } from "../memory/service.js";
 
 /** What an atomic skill receives when the Executor runs it. */
@@ -43,8 +42,6 @@ export interface SkillManifest {
   parameters: JsonSchema;
   /** Ids/facts that must exist first (e.g. "address_book_entry"). */
   prerequisites?: string[];
-  /** Conversational, multi-turn skill (the existing vertical flows). */
-  handler?: VerticalHandler;
   /** Atomic, planner-driven action (params in, outcome out) — where money skills
    *  like pay_person live. The Executor resolves entity params, then calls this. */
   execute?: (
@@ -64,11 +61,6 @@ export class SkillRegistry {
 
   find(id: string): SkillManifest | undefined {
     return this.skills.get(id);
-  }
-
-  /** The executor for a skill id, or null if unknown. */
-  handlerFor(id: string): VerticalHandler | null {
-    return this.skills.get(id)?.handler ?? null;
   }
 
   has(id: string): boolean {
