@@ -3,9 +3,11 @@
  *
  * Every tool an MCP server exposes becomes an atomic skill the Planner can pick
  * and the Executor can run, with zero custom integration code. Config comes from
- * MCP_SERVERS (JSON); child processes inherit brain's env so secrets stay in
- * normal env vars. Inert when unconfigured; a failing server is skipped, never
- * fatal.
+ * MCP_SERVERS (JSON). Child processes get ONLY an allowlisted, non-secret base
+ * env plus what each server explicitly declares (`env` values and `passEnv`
+ * names) — brain's secrets (Paj key, internal token) are never handed to a
+ * third-party MCP package. Tool output is sanitized before it can reach a user.
+ * Inert when unconfigured; a failing server is skipped, never fatal.
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -23,7 +25,60 @@ export interface McpServerConfig {
   name: string;
   command: string;
   args?: string[];
+  /** Explicit env values to hand this server (safe to specify secrets here). */
   env?: Record<string, string>;
+  /** Names of parent-process env vars to forward to this server. Opt-in only —
+   *  nothing from brain's env reaches a child unless it is on this list. */
+  passEnv?: string[];
+}
+
+// The only parent env vars forwarded by default: non-secret system vars a child
+// needs to actually launch (find node/npx, a home dir, locale, CA bundle). No
+// application secret is ever on this list.
+const BASE_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "NODE_EXTRA_CA_CERTS",
+  "SystemRoot",
+  "APPDATA",
+  "USERPROFILE",
+];
+
+/** Build the env for a child MCP process: allowlisted system vars + explicitly
+ *  opted-in parent vars + the server's own declared values. Pure + testable. */
+export function childEnv(
+  server: McpServerConfig,
+  parentEnv: NodeJS.ProcessEnv,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of BASE_ENV_ALLOWLIST) {
+    const v = parentEnv[key];
+    if (typeof v === "string") out[key] = v;
+  }
+  for (const key of server.passEnv ?? []) {
+    const v = parentEnv[key];
+    if (typeof v === "string") out[key] = v;
+  }
+  return { ...out, ...(server.env ?? {}) };
+}
+
+/** Neutralize MCP tool output before it can be shown to a user. An MCP server is
+ *  untrusted: it must not be able to make the bot emit links or unbounded text.
+ *  Strips URLs and control chars and caps length. Pure + testable. */
+export function sanitizeMcpText(text: string): string {
+  const MAX = 2000;
+  return text
+    .replace(/[\x00-\x1F\x7F]/g, " ")
+    .replace(/\bhttps?:\/\/\S+/gi, "[link removed]")
+    .replace(/\bwww\.\S+/gi, "[link removed]")
+    .slice(0, MAX)
+    .trim();
 }
 
 /** Parse MCP_SERVERS (JSON array). Bad JSON => [] (logged, not fatal). */
@@ -85,8 +140,11 @@ export function mcpResultToOutcome(result: unknown): SkillOutcome {
       data = joined;
     }
   }
+  // data (parsed JSON) flows to dependent steps as code; the user-facing reply is
+  // sanitized so an MCP server can't inject links or arbitrary unbounded text.
+  const safe = sanitizeMcpText(joined);
   return {
-    replies: joined ? [{ kind: "text", text: joined }] : [],
+    replies: safe ? [{ kind: "text", text: safe }] : [],
     data,
   };
 }
@@ -102,7 +160,7 @@ export async function registerMcpTools(
       const transport = new StdioClientTransport({
         command: server.command,
         args: server.args ?? [],
-        env: { ...(process.env as Record<string, string>), ...(server.env ?? {}) },
+        env: childEnv(server, process.env),
       });
       const client = new Client({ name: "axis-brain", version: "1.0.0" });
       await client.connect(transport);

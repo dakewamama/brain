@@ -56,6 +56,15 @@ export class SkillRegistry {
   private skills = new Map<string, SkillManifest>();
 
   register(skill: SkillManifest): void {
+    // Never silently replace a baseline skill (e.g. pay_person): a collision is a
+    // bug or a hostile learned/MCP skill trying to shadow a money path. Learned
+    // skills may be re-registered (the Learner updates its own).
+    const existing = this.skills.get(skill.id);
+    if (existing && existing.origin !== "learned") {
+      throw new Error(
+        `skill "${skill.id}" is already registered and cannot be overwritten`,
+      );
+    }
     this.skills.set(skill.id, { origin: "baseline", ...skill });
   }
 
