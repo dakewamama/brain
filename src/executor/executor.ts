@@ -13,7 +13,7 @@
 import type { OutboundMessage } from "../core/types.js";
 import type { MemoryService } from "../memory/service.js";
 import type { SkillRegistry } from "../skills/registry.js";
-import type { Plan, PlanStep } from "../planner/planner.js";
+import type { Plan } from "../planner/planner.js";
 import { childLogger } from "../core/logger.js";
 
 const log = childLogger("executor");
@@ -25,8 +25,6 @@ const PLACE_KEYS = ["location", "address", "place", "destination", "dropoff"];
 export interface ExecutionResult {
   replies: OutboundMessage[];
   completed: boolean;
-  /** A single conversational skill the caller should run via the normal flow. */
-  deferred?: PlanStep;
 }
 
 export class Executor {
@@ -47,10 +45,11 @@ export class Executor {
         continue;
       }
 
-      // A conversational (flow) skill can't run headless in a multi-step plan.
-      // Defer to the normal flow — supported for a lone step.
+      // Every skill is atomic (has execute). A manifest without one is a bug in
+      // registration, not a conversational fallback; skip it rather than stall.
       if (!skill.execute) {
-        return { replies, completed: false, deferred: step };
+        log.warn({ skill: step.skill }, "skill has no execute(); skipping");
+        continue;
       }
 
       // Resolve entity references before the skill sees the params.

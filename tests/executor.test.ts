@@ -4,8 +4,6 @@ import { Executor } from "../src/executor/executor.js";
 import { SkillRegistry, type SkillOutcome } from "../src/skills/registry.js";
 import { InMemoryMemory } from "../src/memory/service.js";
 import type { Plan } from "../src/planner/planner.js";
-import type { VerticalHandler } from "../src/handlers/types.js";
-import type { HandlerResult } from "../src/core/types.js";
 
 function registry(): SkillRegistry {
   const r = new SkillRegistry();
@@ -86,29 +84,19 @@ test("ambiguous recipient pauses the plan and asks", async () => {
   assert.ok(reply.buttons.every((b) => b.id.startsWith("q:")));
 });
 
-test("a conversational skill (no execute) is deferred to its flow", async () => {
+test("a skill registered without execute() is skipped, not stalled", async () => {
   const r = registry();
-  const flow: VerticalHandler = {
-    vertical: "delivery",
-    async start(): Promise<HandlerResult> {
-      return { replies: [] };
-    },
-    async handle(): Promise<HandlerResult> {
-      return { replies: [] };
-    },
-  };
   r.register({
-    id: "delivery",
-    name: "food",
-    description: "order food",
+    id: "broken",
+    name: "broken",
+    description: "no execute",
     parameters: { type: "object" },
-    handler: flow,
   });
   const exec = new Executor(r, new InMemoryMemory());
   const plan: Plan = {
-    steps: [{ skill: "delivery", params: {}, dependsOn: [] }],
+    steps: [{ skill: "broken", params: {}, dependsOn: [] }],
   };
   const result = await exec.run(plan, "u3");
-  assert.equal(result.completed, false);
-  assert.equal(result.deferred?.skill, "delivery");
+  assert.equal(result.completed, true);
+  assert.equal(result.replies.length, 0);
 });
