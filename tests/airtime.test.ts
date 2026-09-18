@@ -52,7 +52,17 @@ function withOnboarding(
     process.env.INTERNAL_API_TOKEN = "tok";
     resetConfigForTests();
     globalThis.fetch = (async (url: string, init?: { body?: string }) => {
-      captured.url = url;
+      // Provision is called first and idempotently; return a wallet address so the
+      // buy path (and the fund message) can use it. Capture only the buy call.
+      if (String(url).endsWith("/airtime/provision")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({ userId: "user-1", address: "Wa11etAddr111", created: true }),
+        } as Response;
+      }
+      captured.url = String(url);
       captured.body = init?.body ? JSON.parse(init.body) : null;
       return {
         ok: response.ok,
@@ -115,6 +125,23 @@ test(
         out.replies[0].kind === "text" ? out.replies[0].text : "",
         /processing/i,
       );
+    },
+  ),
+);
+
+test(
+  "buy_airtime with an empty balance tells the user where to fund",
+  withOnboarding(
+    { ok: false, status: 402, body: { error: "insufficient balance" } },
+    async () => {
+      const out = await buyAirtimeSkill.execute!(
+        { network: "mtn", amount: 100, phone: "08031234567" },
+        ctx,
+      );
+      assert.equal(out.needsInput, true);
+      const text = out.replies[0].kind === "text" ? out.replies[0].text : "";
+      assert.match(text, /Wa11etAddr111/); // the provisioned deposit address
+      assert.match(text, /add usdc|fund/i);
     },
   ),
 );
