@@ -122,8 +122,18 @@ export class OpenAICompatProvider implements ModelProvider {
     const body: Record<string, unknown> = { model: modelId, messages: msgs };
     if (opts.temperature !== undefined) body.temperature = opts.temperature;
     if (opts.maxOutputTokens !== undefined) body.max_tokens = opts.maxOutputTokens;
-    // Broadly-supported JSON mode. The prompt already asks for JSON.
-    if (opts.responseSchema) body.response_format = { type: "json_object" };
+    // Broadly-supported JSON mode. Groq (and some others) reject json_object unless
+    // the literal word "json" appears in the messages, so guarantee it.
+    if (opts.responseSchema) {
+      body.response_format = { type: "json_object" };
+      if (!msgs.some((m) => /json/i.test(m.content))) {
+        if (msgs[0]?.role === "system") {
+          msgs[0].content += "\nRespond with a single JSON object.";
+        } else {
+          msgs.unshift({ role: "system", content: "Respond with a single JSON object." });
+        }
+      }
+    }
     if (opts.tools?.length) {
       body.tools = opts.tools.map((t) => ({
         type: "function",
