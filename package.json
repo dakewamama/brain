@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "console": "tsx src/console.ts"
+    "console": "tsx src/console.ts",
+    "eval:planner": "tsx src/eval/run.ts"
   },
   "keywords": [
     "whatsapp",
