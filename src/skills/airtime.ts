@@ -71,6 +71,13 @@ export const buyAirtimeSkill: SkillManifest = {
     // single onboarding call from a double-submit. A fresh key per attempt is
     // correct — buying again is a new purchase.
     const owner = ctx.userId;
+
+    // Ensure the user has a custodial wallet + identity link (idempotent), so the
+    // debit can resolve. Returns the deposit address we tell them to fund.
+    const prov = await callOnboarding("/airtime/provision", { userId: owner });
+    const address =
+      typeof prov.data.address === "string" ? prov.data.address : undefined;
+
     const idempotencyKey = `airtime-${owner}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const res = await callOnboarding("/airtime", {
       owner,
@@ -79,6 +86,20 @@ export const buyAirtimeSkill: SkillManifest = {
       phone,
       idempotencyKey,
     });
+    // Empty balance: tell them exactly where to add funds.
+    if (res.status === 402) {
+      return {
+        replies: [
+          {
+            kind: "text",
+            text: address
+              ? `You don't have enough balance yet. Add USDC to your Axis wallet to top up:\n${address}`
+              : "You don't have enough balance yet. Add funds to your Axis wallet first.",
+          },
+        ],
+        needsInput: true,
+      };
+    }
     if (!res.ok) {
       return {
         replies: [
