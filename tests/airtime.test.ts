@@ -54,7 +54,7 @@ function withOnboarding(
     globalThis.fetch = (async (url: string, init?: { body?: string }) => {
       // Provision is called first and idempotently; return a wallet address so the
       // buy path (and the fund message) can use it. Capture only the buy call.
-      if (String(url).endsWith("/airtime/provision")) {
+      if (String(url).endsWith("/wallet")) {
         return {
           ok: true,
           status: 200,
