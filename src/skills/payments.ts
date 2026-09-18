@@ -17,7 +17,7 @@ import { childLogger } from "../core/logger.js";
 
 const log = childLogger("payments");
 
-async function callOnboarding(
+export async function callOnboarding(
   path: string,
   body: Record<string, unknown>,
 ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {

@@ -6,12 +6,14 @@
  */
 import { SkillRegistry } from "./registry.js";
 import { payPersonSkill, saveAddressSkill } from "./payments.js";
+import { buyAirtimeSkill } from "./airtime.js";
 
 export const skills = new SkillRegistry();
 
 // Atomic money skills (deterministic; call onboarding for custody + off-ramp).
 skills.register(saveAddressSkill);
 skills.register(payPersonSkill);
+skills.register(buyAirtimeSkill);
 
 export { SkillRegistry } from "./registry.js";
 export type { SkillManifest } from "./registry.js";
