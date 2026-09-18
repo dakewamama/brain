@@ -9,7 +9,7 @@ import {
 import { resetConfigForTests } from "../src/core/config.js";
 import type { SkillContext } from "../src/skills/registry.js";
 
-const ctx = {} as SkillContext; // buy_airtime.execute ignores ctx
+const ctx = { userId: "user-1" } as SkillContext; // owner for the debit
 
 test("normalizePhone accepts +234/234 and strips formatting", () => {
   assert.equal(normalizePhone("+234 803 123 4567"), "08031234567");
@@ -81,10 +81,18 @@ test(
         ctx,
       );
       assert.match(captured.url, /\/airtime$/);
-      const body = captured.body as { network: string; amount: number; phone: string };
+      const body = captured.body as {
+        network: string;
+        amount: number;
+        phone: string;
+        owner: string;
+        idempotencyKey: string;
+      };
       assert.equal(body.network, "mtn");
       assert.equal(body.amount, 500);
       assert.equal(body.phone, "08031234567");
+      assert.equal(body.owner, "user-1");
+      assert.match(body.idempotencyKey, /^airtime-user-1-/);
       assert.equal(out.needsInput, undefined);
       assert.match(
         out.replies[0].kind === "text" ? out.replies[0].text : "",

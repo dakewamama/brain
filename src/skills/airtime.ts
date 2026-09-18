@@ -5,7 +5,7 @@
  * (which holds the VTpass key and, later, debits the balance + books the remnant
  * as pool gain). No number is invented by a model — the amount is the user's.
  */
-import type { SkillManifest, SkillOutcome } from "./registry.js";
+import type { SkillManifest, SkillOutcome, SkillContext } from "./registry.js";
 import { callOnboarding } from "./payments.js";
 
 /** Strip formatting; accept +234/234 and normalise to local 0-prefixed form. */
@@ -53,7 +53,7 @@ export const buyAirtimeSkill: SkillManifest = {
     required: ["amount", "phone"],
   },
   origin: "baseline",
-  async execute(params): Promise<SkillOutcome> {
+  async execute(params, ctx: SkillContext): Promise<SkillOutcome> {
     const phone = normalizePhone(String(params.phone ?? ""));
     const amount = Number(params.amount);
     let network =
@@ -67,7 +67,18 @@ export const buyAirtimeSkill: SkillManifest = {
     if (!network)
       return needs("Which network is that number on — MTN, Glo, Airtel or 9mobile?");
 
-    const res = await callOnboarding("/airtime", { network, amount, phone });
+    // owner = the user's balance key (custodial); idempotencyKey guards this
+    // single onboarding call from a double-submit. A fresh key per attempt is
+    // correct — buying again is a new purchase.
+    const owner = ctx.userId;
+    const idempotencyKey = `airtime-${owner}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const res = await callOnboarding("/airtime", {
+      owner,
+      network,
+      amount,
+      phone,
+      idempotencyKey,
+    });
     if (!res.ok) {
       return {
         replies: [
