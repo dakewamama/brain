@@ -72,9 +72,9 @@ export const buyAirtimeSkill: SkillManifest = {
     // correct — buying again is a new purchase.
     const owner = ctx.userId;
 
-    // Ensure the user has a custodial wallet + identity link (idempotent), so the
-    // debit can resolve. Returns the deposit address we tell them to fund.
-    const prov = await callOnboarding("/airtime/provision", { userId: owner });
+    // The user's wallet is created at auth; this is a safety ensure (idempotent).
+    // It returns the deposit address we show if the balance can't cover the buy.
+    const prov = await callOnboarding("/wallet", { userId: owner });
     const address =
       typeof prov.data.address === "string" ? prov.data.address : undefined;
 
