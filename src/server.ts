@@ -9,6 +9,8 @@ import { WebAdapter, WebInboundError } from "./channels/web.js";
 import { modelProvider } from "./model/index.js";
 import { browse, browseEnabled } from "./browse/serper.js";
 import { secretOk, bearer } from "./router/webhookAuth.js";
+import { getAuth } from "./auth/index.js";
+import { AuthError } from "./auth/auth.js";
 import type { ChannelId, OutboundMessage } from "./core/types.js";
 const log = childLogger("server");
 
@@ -151,6 +153,41 @@ export function createServer() {
       step: session?.step ?? "",
     });
   });
+
+  // Email + password accounts. Both return { webUserId, email } — the stable id the
+  // account (and its wallet) is keyed by. Public routes (they ARE the sign-in).
+  const authRoute =
+    (kind: "signup" | "login") => async (req: Request, res: Response) => {
+      const auth = getAuth();
+      if (!auth) {
+        res.status(503).json({ error: "auth not configured" });
+        return;
+      }
+      const email = typeof req.body?.email === "string" ? req.body.email : "";
+      const password = typeof req.body?.password === "string" ? req.body.password : "";
+      if (!email || !password) {
+        res.status(400).json({ error: "email and password are required" });
+        return;
+      }
+      try {
+        const r = kind === "signup"
+          ? await auth.signup(email, password)
+          : await auth.login(email, password);
+        res.json(r);
+      } catch (err) {
+        if (err instanceof AuthError) {
+          res.status(err.code === "email_taken" ? 409 : 401).json({
+            error: err.message,
+            code: err.code,
+          });
+          return;
+        }
+        log.error({ err }, "auth error");
+        res.sendStatus(500);
+      }
+    };
+  app.post("/auth/signup", authRoute("signup"));
+  app.post("/auth/login", authRoute("login"));
 
   // Everything under /admin exposes user identities and full transcripts. Require a
   // bearer token; if ADMIN_TOKEN is unset, deny all (fail closed) rather than open.
