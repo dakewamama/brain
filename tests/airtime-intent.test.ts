@@ -3,10 +3,17 @@ import assert from "node:assert/strict";
 import {
   parseAirtime,
   looksLikeAirtime,
+  looksLikeBalance,
   mergeSlots,
   missingSlot,
   hasAnySlot,
 } from "../src/router/airtimeIntent.js";
+
+test("looksLikeBalance detects balance questions, not airtime", () => {
+  assert.equal(looksLikeBalance("what is my balance?"), true);
+  assert.equal(looksLikeBalance("how much do i have"), true);
+  assert.equal(looksLikeBalance("buy ₦200 MTN airtime for 08031234567"), false);
+});
 
 test("looksLikeAirtime detects the vertical", () => {
   assert.equal(looksLikeAirtime("buy ₦200 MTN airtime for 08031234567"), true);

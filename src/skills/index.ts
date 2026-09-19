@@ -7,6 +7,7 @@
 import { SkillRegistry } from "./registry.js";
 import { payPersonSkill, saveAddressSkill } from "./payments.js";
 import { buyAirtimeSkill } from "./airtime.js";
+import { checkBalanceSkill } from "./balance.js";
 
 export const skills = new SkillRegistry();
 
@@ -14,6 +15,7 @@ export const skills = new SkillRegistry();
 skills.register(saveAddressSkill);
 skills.register(payPersonSkill);
 skills.register(buyAirtimeSkill);
+skills.register(checkBalanceSkill);
 
 export { SkillRegistry } from "./registry.js";
 export type { SkillManifest } from "./registry.js";
