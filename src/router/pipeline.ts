@@ -15,6 +15,15 @@ import { skills } from "../skills/index.js";
 import { plan } from "../planner/planner.js";
 import { Executor } from "../executor/executor.js";
 import { getMemory } from "../memory/index.js";
+import {
+  parseAirtime,
+  looksLikeAirtime,
+  mergeSlots,
+  missingSlot,
+  hasAnySlot,
+  slotPrompt,
+  type AirtimeSlots,
+} from "./airtimeIntent.js";
 
 const log = childLogger("pipeline");
 
@@ -44,17 +53,55 @@ export function createPipeline(deps: {
       });
       const conversationId = `${msg.channel}:${msg.userId}`;
 
-      const recent = (await profileStore.summary(conversationId)) ?? undefined;
-      const p = await plan(modelProvider, conversationId, msg.text, skills, {
-        recent,
-      });
-
       let replies: OutboundMessage[];
-      if (p.steps.length > 0) {
-        const exec = await new Executor(skills, getMemory()).run(p, msg.userId);
-        replies = exec.replies.length > 0 ? exec.replies : [menuMessage()];
+      let steps = 0;
+
+      // Deterministic fast-path for the live vertical (airtime): parse slots,
+      // remember a partial request across turns, and only run the skill when
+      // complete. This keeps airtime off LLM variance and makes multi-turn
+      // ("MTN" answering "which network?") work.
+      const pending = (session?.context?.pendingAirtime as AirtimeSlots | undefined) ?? undefined;
+      const parsed = parseAirtime(msg.text);
+      const airtimeTurn =
+        looksLikeAirtime(msg.text) || (pending != null && hasAnySlot(parsed));
+
+      if (airtimeTurn) {
+        const merged = mergeSlots(pending ?? {}, parsed);
+        const missing = missingSlot(merged);
+        if (missing) {
+          await sessions.patch(msg.channel, msg.userId, {
+            context: { ...(session?.context ?? {}), pendingAirtime: merged },
+          });
+          replies = [{ kind: "text", text: slotPrompt(missing) }];
+        } else {
+          const ctx = { ...(session?.context ?? {}) };
+          delete (ctx as Record<string, unknown>).pendingAirtime;
+          await sessions.patch(msg.channel, msg.userId, { context: ctx });
+          const exec = await new Executor(skills, getMemory()).run(
+            { steps: [{ skill: "buy_airtime", params: { ...merged } as Record<string, unknown>, dependsOn: [] }] },
+            msg.userId,
+          );
+          replies = exec.replies.length > 0 ? exec.replies : [menuMessage()];
+          steps = 1;
+        }
       } else {
-        replies = [menuMessage()];
+        // A non-airtime turn cancels any pending airtime, then goes to the planner.
+        if (pending) {
+          const ctx = { ...(session?.context ?? {}) };
+          delete (ctx as Record<string, unknown>).pendingAirtime;
+          await sessions.patch(msg.channel, msg.userId, { context: ctx });
+        }
+        const recent = (await profileStore.summary(conversationId)) ?? undefined;
+        const p = await plan(modelProvider, conversationId, msg.text, skills, {
+          recent,
+        });
+        steps = p.steps.length;
+        if (p.steps.length > 0) {
+          const exec = await new Executor(skills, getMemory()).run(p, msg.userId);
+          replies = exec.replies.length > 0 ? exec.replies : [menuMessage()];
+        } else {
+          replies = [menuMessage()];
+        }
       }
 
       // Localize English-authored replies into the session language, if one is
@@ -78,7 +125,7 @@ export function createPipeline(deps: {
           step: session?.step,
         });
       }
-      log.info({ conversationId, steps: p.steps.length }, "pipeline.turn");
+      log.info({ conversationId, steps, airtime: airtimeTurn }, "pipeline.turn");
       return out;
     },
   };
