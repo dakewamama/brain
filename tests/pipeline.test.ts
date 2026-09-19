@@ -42,6 +42,19 @@ test("axis never emits a direct link", async () => {
   assert.doesNotMatch(r, /https?:\/\//);
 });
 
+test("airtime is multi-turn: asks for the network, then resumes on the answer", async () => {
+  const { say } = freshPipeline();
+  // 0801 isn't an inferable prefix and no network stated -> it must ask.
+  const r1 = await say("buy 200 airtime for 08012345678");
+  assert.match(r1, /which network/i);
+  // The follow-up answer resumes the pending request (reaches buy_airtime, which
+  // without onboarding configured reports it can't buy — proving it got there,
+  // not the generic greeting).
+  const r2 = await say("MTN");
+  assert.doesNotMatch(r2, /transfers and bills are coming/i); // not the fallback
+  assert.match(r2, /airtime|couldn't buy|balance/i);
+});
+
 test("every message is recorded in the conversation store", async () => {
   const { say, conversations, userId } = freshPipeline();
   await say("hello");
