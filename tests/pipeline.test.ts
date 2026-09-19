@@ -33,7 +33,7 @@ function freshPipeline() {
 test("a turn with no actionable plan falls to the menu", async () => {
   const { say } = freshPipeline();
   const r = await say("hi");
-  assert.match(r, /Axis/);
+  assert.match(r, /airtime/i);
 });
 
 test("axis never emits a direct link", async () => {
