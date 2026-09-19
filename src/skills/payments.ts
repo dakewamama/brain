@@ -38,6 +38,22 @@ export async function callOnboarding(
   return { ok: res.ok, status: res.status, data };
 }
 
+/** GET variant for read-only onboarding endpoints (e.g. /wallet/balance). */
+export async function getFromOnboarding(
+  path: string,
+): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
+  const cfg = getConfig();
+  if (!cfg.ONBOARDING_URL || !cfg.INTERNAL_API_TOKEN) {
+    return { ok: false, status: 0, data: { error: "payments not configured" } };
+  }
+  const res = await fetch(`${cfg.ONBOARDING_URL.replace(/\/$/, "")}${path}`, {
+    headers: { authorization: `Bearer ${cfg.INTERNAL_API_TOKEN}` },
+  });
+  const text = await res.text();
+  const data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  return { ok: res.ok, status: res.status, data };
+}
+
 function accountNameOf(data: Record<string, unknown>): string | undefined {
   const direct = data.accountName;
   const nested = (data.data as { accountName?: string } | undefined)?.accountName;

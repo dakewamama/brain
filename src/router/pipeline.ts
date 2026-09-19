@@ -18,6 +18,7 @@ import { getMemory } from "../memory/index.js";
 import {
   parseAirtime,
   looksLikeAirtime,
+  looksLikeBalance,
   mergeSlots,
   missingSlot,
   hasAnySlot,
@@ -65,7 +66,15 @@ export function createPipeline(deps: {
       const airtimeTurn =
         looksLikeAirtime(msg.text) || (pending != null && hasAnySlot(parsed));
 
-      if (airtimeTurn) {
+      if (looksLikeBalance(msg.text) && !airtimeTurn) {
+        // Balance is deterministic too (don't leave it to LLM variance).
+        const exec = await new Executor(skills, getMemory()).run(
+          { steps: [{ skill: "check_balance", params: {}, dependsOn: [] }] },
+          msg.userId,
+        );
+        replies = exec.replies.length > 0 ? exec.replies : [menuMessage()];
+        steps = 1;
+      } else if (airtimeTurn) {
         const merged = mergeSlots(pending ?? {}, parsed);
         const missing = missingSlot(merged);
         if (missing) {

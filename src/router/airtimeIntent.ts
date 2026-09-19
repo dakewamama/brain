@@ -30,6 +30,13 @@ export function looksLikeAirtime(text: string): boolean {
   return /\bairtime\b|\btop\s?-?\s?up\b|\brecharge\b/i.test(text);
 }
 
+/** True when a message asks about wallet balance. */
+export function looksLikeBalance(text: string): boolean {
+  return /\bbalance\b|how much (do i|have i|money)|what.*\bhave\b.*\bwallet\b|my wallet/i.test(
+    text,
+  );
+}
+
 /** Extract whatever airtime slots the message states. */
 export function parseAirtime(text: string): AirtimeSlots {
   const slots: AirtimeSlots = {};
