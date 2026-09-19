@@ -6,6 +6,8 @@ import type { OutboundMessage } from "../core/types.js";
 export function menuMessage(): OutboundMessage {
   return {
     kind: "text",
-    text: 'Hi, I\'m Axis. Tell me what you need, for example "buy ₦500 airtime for 08012345678".',
+    text:
+      "Right now I can buy airtime and data. Try \"buy ₦500 MTN airtime for " +
+      "08031234567\". Transfers and bills are coming soon.",
   };
 }
