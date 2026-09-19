@@ -54,12 +54,18 @@ export class AuthService {
         id text PRIMARY KEY,
         email text UNIQUE NOT NULL,
         password_hash text NOT NULL,
+        name text,
         created_at timestamptz NOT NULL DEFAULT now()
       )`,
     );
+    // Existing deployments: add the column if the table predates it.
+    await this.pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS name text`);
   }
 
-  async signup(email: string, password: string): Promise<{ webUserId: string; email: string }> {
+  async signup(
+    email: string,
+    password: string,
+  ): Promise<{ webUserId: string; email: string; name: string }> {
     validateCredentials(email, password);
     const e = email.trim().toLowerCase();
     const id = `web_${randomUUID()}`;
@@ -74,13 +80,16 @@ export class AuthService {
       }
       throw err;
     }
-    return { webUserId: id, email: e };
+    return { webUserId: id, email: e, name: "" };
   }
 
-  async login(email: string, password: string): Promise<{ webUserId: string; email: string }> {
+  async login(
+    email: string,
+    password: string,
+  ): Promise<{ webUserId: string; email: string; name: string }> {
     const e = email.trim().toLowerCase();
-    const r = await this.pool.query<{ id: string; password_hash: string }>(
-      `SELECT id, password_hash FROM users WHERE email = $1`,
+    const r = await this.pool.query<{ id: string; password_hash: string; name: string | null }>(
+      `SELECT id, password_hash, name FROM users WHERE email = $1`,
       [e],
     );
     const row = r.rows[0];
@@ -88,6 +97,14 @@ export class AuthService {
     if (!verifyPassword(password, row.password_hash)) {
       throw new AuthError("Wrong password.", "bad_password");
     }
-    return { webUserId: row.id, email: e };
+    return { webUserId: row.id, email: e, name: row.name ?? "" };
+  }
+
+  /** Persist the display name onto the account so login restores it. */
+  async setName(webUserId: string, name: string): Promise<void> {
+    await this.pool.query(`UPDATE users SET name = $2 WHERE id = $1`, [
+      webUserId,
+      name.trim().slice(0, 80),
+    ]);
   }
 }

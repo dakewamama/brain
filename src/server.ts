@@ -188,6 +188,27 @@ export function createServer() {
     };
   app.post("/auth/signup", authRoute("signup"));
   app.post("/auth/login", authRoute("login"));
+  // Persist the display name onto the account (keyed by the account's webUserId).
+  app.post("/auth/name", async (req: Request, res: Response) => {
+    const auth = getAuth();
+    if (!auth) {
+      res.status(503).json({ error: "auth not configured" });
+      return;
+    }
+    const webUserId = typeof req.body?.webUserId === "string" ? req.body.webUserId : "";
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    if (!webUserId || !name.trim()) {
+      res.status(400).json({ error: "webUserId and name are required" });
+      return;
+    }
+    try {
+      await auth.setName(webUserId, name);
+      res.json({ ok: true });
+    } catch (err) {
+      log.error({ err }, "auth setName error");
+      res.sendStatus(500);
+    }
+  });
 
   // Everything under /admin exposes user identities and full transcripts. Require a
   // bearer token; if ADMIN_TOKEN is unset, deny all (fail closed) rather than open.
