@@ -63,6 +63,8 @@ export const buyAirtimeSkill: SkillManifest = {
     if (!validNigerianPhone(phone))
       return needs("That doesn't look like a Nigerian number. Send it like 08012345678.");
     if (!amount || amount <= 0) return needs("How much airtime should I buy?");
+    if (amount < 50) return needs("The minimum airtime is ₦50.");
+    if (amount > 50000) return needs("The most I can send in one go is ₦50,000.");
     if (!network) network = networkFromPhone(phone) ?? "";
     if (!network)
       return needs("Which network is that number on — MTN, Glo, Airtel or 9mobile?");
