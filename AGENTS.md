@@ -5,7 +5,7 @@ This file supplements those rules; it does not authorize unrelated work.
 
 - Current implementation branch: `runtime/mcp-gateway`, stacked on
   `runtime/case-core`. Keep both PRs draft and unmerged.
-- The user requested a milestone stop. Read `docs/MCP-MILESTONE.md` before
+- The user resumed after the milestone checkpoint. Read `docs/MCP-MILESTONE.md` before
   resuming; it records P0 gaps, validation boundaries and the next-build strategy.
 - Do not claim a completed production release. Do not expand capability breadth
   before closing crash recovery, financial debit-bound and security review gaps.

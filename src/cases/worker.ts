@@ -74,6 +74,7 @@ export class CaseWorker {
     if (this.running) return; // never overlap sweeps
     this.running = true;
     try {
+      await this.runner.recoverRunning();
       await this.runner.wakeDueCases();
       await this.runner.reconcileInDoubt();
       await this.deliverReplies();

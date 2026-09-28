@@ -117,6 +117,7 @@ export interface CaseStore {
 
   /** Cases parked on a timer whose wake_at has passed. */
   listWakeable(now: Date): Promise<CaseRecord[]>;
+  claimWake(id: string, now: Date): Promise<boolean>;
   /** Open cases for a user on a channel (newest first) — signal routing. */
   listOpenCases(userId: string, channel: string): Promise<CaseRecord[]>;
   /** All open cases with a given status (worker sweeps: in_doubt). */
@@ -435,6 +436,11 @@ export class PgCaseStore implements CaseStore {
     return r.rows.map((row) => ({ id: row.id as string, payload: row.payload as Record<string, unknown> }));
   }
 
+  async claimWake(id: string, now: Date): Promise<boolean> {
+    const result=await this.pool.query("UPDATE cases SET status='running', updated_at=now() WHERE id=$1 AND status='waiting_timeout' AND wake_at<=$2 RETURNING id",[id,now]);
+    return !!result.rowCount;
+  }
+
   async listWakeable(now: Date): Promise<CaseRecord[]> {
     const r = await this.pool.query(
       `SELECT * FROM cases WHERE status = 'waiting_timeout' AND wake_at IS NOT NULL AND wake_at <= $1
@@ -669,6 +675,12 @@ export class InMemoryCaseStore implements CaseStore {
       .filter((r) => !r.processed)
       .slice(0, limit)
       .map((r) => ({ id: r.id, payload: r.payload }));
+  }
+
+  async claimWake(id: string, now: Date): Promise<boolean> {
+    const c=this.cases.get(id);
+    if(!c || c.status!=="waiting_timeout" || !c.wakeAt || c.wakeAt>now) return false;
+    c.status="running";c.updatedAt=new Date();return true;
   }
 
   async listWakeable(now: Date): Promise<CaseRecord[]> {

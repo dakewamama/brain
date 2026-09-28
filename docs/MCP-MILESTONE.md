@@ -1,7 +1,7 @@
 # MCP milestone and next-build strategy
 
-Checkpoint requested by the user on 2026-09-28. Stop expanding scope, preserve
-this work, and continue from the existing `runtime/mcp-gateway` branch.
+Checkpoint requested by the user on 2026-09-28; the user subsequently resumed work.
+Continue closing the P0 gaps below on `runtime/mcp-gateway` before expanding scope.
 This is a stacked draft on `runtime/case-core`; merge neither branch yet.
 
 ## Preserved progression
@@ -52,11 +52,11 @@ new planning framework was introduced.
 
 ### P0 — crash recovery and production security/accounting review
 
-1. Add a **real process-kill test while a Gateway Action is executing**. The
-   current worker sweeps waits and IN_DOUBT Cases, but a process killed while its
-   Case is `running` can leave it stranded. Add bounded ownership/recovery semantics
-   behind the existing runtime interface; recover by requery, never a new economic
-   intent. This is not permission to build another workflow engine.
+1. **Closed after milestone:** a real SIGKILL-after-acceptance test now passes.
+   The existing worker recovers persisted running Cases under PostgreSQL session
+   locks and the Gateway requeries the original request. Purchase count stays one.
+   Conditional wake claims prevent stale timer snapshots from reviving cancellation.
+   No replacement workflow engine was introduced.
 2. Test independent service processes executing and cancelling the same
    preparation. Review atomicity across approval checks, grant revocation,
    reservation updates, attempt recording and terminal verification. Existing

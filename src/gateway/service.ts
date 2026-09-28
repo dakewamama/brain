@@ -232,7 +232,15 @@ export class AxisGateway {
     await this.store.updateActionStatus(action.id,"executing");await this.money(action.id,"IN_FLIGHT");
     await this.store.appendAttempt({id:randomUUID(),actionId:action.id,provider:descriptor.provider.id,mode:descriptor.mode,request:{requery:started},outcome:"submitted"});
     let result:ProviderResult;
-    try { await this.grants.resolve(prep.grant_id,prep.client_id); result=await this.dispatch(descriptor.id,prep.proposal.actions[0].arguments,{actionId:action.id,idempotencyKey:action.idempotencyKey,userId:p.userId,context},started); }
+    try {
+      const latest=await this.grants.resolve(prep.grant_id,prep.client_id);
+      await this.validatePreparation(started?{...prep,expires_at:new Date(Date.now()+1000)}:prep,latest);
+      if(!await this.approval(prep,latest)) throw new AxisError("approval_required");
+      if(validated.requirements.money) {
+        const total=await this.pool.query("SELECT COALESCE(SUM(amount_minor),0)::text AS total FROM action_money WHERE grant_id=$1 AND state NOT IN ('RELEASED','REVERSED','REFUNDED')",[latest.grantId]);
+        if(!latest.authority.financial || BigInt(total.rows[0].total)>BigInt(latest.authority.financial.totalMinor)) throw new AxisError("financial_limit");
+      }
+      result=await this.dispatch(descriptor.id,prep.proposal.actions[0].arguments,{actionId:action.id,idempotencyKey:action.idempotencyKey,userId:p.userId,context},started); }
     catch { result={outcome:descriptor.risk==="read"?"failed":"unknown",data:{}}; }
     await this.store.appendAttempt({id:randomUUID(),actionId:action.id,provider:descriptor.provider.id,mode:descriptor.mode,request:{requery:started},outcome:result.outcome==="succeeded"?"ok":result.outcome==="failed"?"failed":"unknown",response:{...result},providerRef:result.providerRef});
     await this.store.addEvidence({id:randomUUID(),caseId:workId,actionId:action.id,kind:"provider_receipt",payload:{...result,provider:descriptor.provider.id,mode:descriptor.mode}});

@@ -19,3 +19,12 @@ test("success:true is not proof of an external write or financial settlement",as
  store.actions.get("a")!.input.verificationRisk="financial";
  assert.equal(await verifyCompletion(store,"c"),false);
 });
+test("a stale wake snapshot cannot revive a cancelled Case",async()=>{
+ const store=new InMemoryCaseStore();const runner=new CaseRunner(store);let calls=0;
+ runner.registerPlaybook({id:"timer",initialState:"run",states:{run:{async onEnter(){calls++;return {fail:{reason:"test"}};}}}});
+ const c=await store.createCase({id:"timer",userId:"u",channel:"test",goal:"g",playbook:"timer",state:"run"});
+ await store.updateCase(c.id,{status:"waiting_timeout",wakeAt:new Date(0)});
+ const original=store.listWakeable.bind(store);
+ store.listWakeable=async now=>{const snapshot=await original(now);await store.updateCase(c.id,{status:"cancelled"});return snapshot;};
+ await runner.wakeDueCases();assert.equal(calls,0);assert.equal((await store.getCase(c.id))?.status,"cancelled");
+});

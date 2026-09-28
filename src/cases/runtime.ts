@@ -313,7 +313,7 @@ export class CaseRunner {
     const due = await this.store.listWakeable(now);
     let n = 0;
     for (const c of due) {
-      await this.store.updateCase(c.id, { status: "running" });
+      if(!this.playbooks.has(c.playbook) || !await this.store.claimWake(c.id,now)) continue;
       await this.store.appendEvent(c.id, "case_wake", { wakeAt: c.wakeAt?.toISOString() ?? null });
       try {
         await this.advance(c.id);
@@ -323,6 +323,17 @@ export class CaseRunner {
       n++;
     }
     return n;
+  }
+
+  /** A process can die after a Case became running. Its database session lock
+   * is released by PostgreSQL; serialized advance then resumes the recorded
+   * action. Gateway playbooks requery a submitted action, never purchase again. */
+  async recoverRunning(): Promise<void> {
+    for(const c of await this.store.listByStatus("running")) {
+      if(!this.playbooks.has(c.playbook)) continue;
+      try { await this.advance(c.id); }
+      catch(error) { log.error({caseId:c.id,error:String(error)},"running case recovery will retry"); }
+    }
   }
 
   /** Run registered reconcilers over in_doubt cases. Called by the worker loop. */
@@ -343,8 +354,9 @@ export class CaseRunner {
   }
 
   private async failCase(caseId: string, reason: string, state?: string): Promise<CaseStepOutcome> {
-    await this.store.appendEvent(caseId, "case_failed", { reason, ...(state ? { state } : {}) });
-    await this.store.updateCase(caseId, { status: "failed" });
+    const ambiguous=(await this.store.listActions(caseId)).some(a=>a.status==="executing"||a.status==="in_doubt");
+    await this.store.appendEvent(caseId, ambiguous?"case_in_doubt":"case_failed", { reason, ...(state ? { state } : {}) });
+    await this.store.updateCase(caseId, { status: ambiguous?"in_doubt":"failed" });
     return this.outcome((await this.store.getCase(caseId))!, true);
   }
 
