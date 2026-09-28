@@ -17,6 +17,8 @@ import type { MemoryService } from "../memory/service.js";
 /** What an atomic skill receives when the Executor runs it. */
 export interface SkillContext {
   userId: string;
+  /** Channel the triggering message arrived on (case runtime needs it). */
+  channel?: string;
   memory: MemoryService;
   /** Outputs of earlier plan steps, by step index. */
   priorResults: Record<number, unknown>;

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   InboundMessage,
   OutboundMessage,
@@ -16,6 +17,10 @@ import { plan } from "../planner/planner.js";
 import { Executor } from "../executor/executor.js";
 import { getMemory } from "../memory/index.js";
 import {
+  getCaseRunner,
+  getCaseStore,
+} from "../cases/index.js";
+import {
   parseAirtime,
   looksLikeAirtime,
   looksLikeBalance,
@@ -29,16 +34,21 @@ import {
 const log = childLogger("pipeline");
 
 export interface Pipeline {
-  process(msg: InboundMessage): Promise<OutboundMessage[]>;
+  process(msg: InboundMessage, opts?: { skipClaim?: boolean }): Promise<OutboundMessage[]>;
 }
+
+/** Replies that read as answers to an open confirmation (yes/no) rather than
+ *  new instructions. Only these are routed into a waiting case. */
+const CONFIRM_REPLY = /^(yes|y|no|n|confirm|cancel|stop|ok|okay|go ahead)\b/i;
 
 /**
  * The one and only decision path: the Planner turns a message into an ordered
  * list of skill steps; the Executor runs them (resolving entities, asking to
- * disambiguate, calling deterministic skill code). There are no keyword routers,
- * no separate intent classifier, and no comprehension layer — the model plans,
- * the code executes. An empty plan (greeting, small talk, or something Axis can't
- * yet do) falls to the menu.
+ * disambiguate, calling deterministic skill code). Money skills route into the
+ * Case runtime — durable, policy-gated, verifier-checked — so the same
+ * implementation serves both the deterministic fast path and the planner.
+ * An empty plan (greeting, small talk, or something Axis can't yet do) falls
+ * to the menu.
  */
 export function createPipeline(deps: {
   sessions: SessionStore;
@@ -46,7 +56,25 @@ export function createPipeline(deps: {
 }): Pipeline {
   const { sessions, conversations } = deps;
   return {
-    async process(msg: InboundMessage): Promise<OutboundMessage[]> {
+    async process(msg: InboundMessage, opts?: { skipClaim?: boolean }): Promise<OutboundMessage[]> {
+      // Durable acceptance: the first arrival owns processing. A replayed
+      // webhook (same provider message id on the same channel) is dropped here.
+      // Retry sweeps pass skipClaim — the row already exists from the first try.
+      let inboundId = `inb_${randomUUID()}`;
+      if (!opts?.skipClaim) {
+        const providerMessageId = msg.messageId ?? `anon-${randomUUID()}`;
+        const claimed = await getCaseStore().claimInbound({
+          id: inboundId,
+          channel: msg.channel,
+          providerMessageId,
+          payload: msg as unknown as Record<string, unknown>,
+        });
+        if (!claimed) {
+          log.info({ channel: msg.channel, providerMessageId }, "duplicate inbound dropped");
+          return [];
+        }
+      }
+
       const session = await sessions.get(msg.channel, msg.userId);
       await recordInbound(conversations, msg, {
         vertical: session?.vertical,
@@ -57,10 +85,22 @@ export function createPipeline(deps: {
       let replies: OutboundMessage[];
       let steps = 0;
 
+      // A case waiting on the user (e.g. "Confirm: buy ₦25,000 ...? yes/no")
+      // consumes confirmation-style replies and resumes durably.
+      const runner = getCaseRunner();
+      if (CONFIRM_REPLY.test(msg.text.trim())) {
+        const signaled = await runner.signalLatest(msg.userId, msg.channel, msg.text.trim());
+        if (signaled) {
+          replies = signaled.replies.length > 0 ? signaled.replies : [menuMessage()];
+          steps = 1;
+          await finish(msg, conversations, session, conversationId, replies, steps, inboundId);
+          return replies;
+        }
+      }
+
       // Deterministic fast-path for the live vertical (airtime): parse slots,
-      // remember a partial request across turns, and only run the skill when
-      // complete. This keeps airtime off LLM variance and makes multi-turn
-      // ("MTN" answering "which network?") work.
+      // remember a partial request across turns, and start a Case when complete.
+      // The Case (not this code) runs policy → reserve → provider → verify.
       const pending = (session?.context?.pendingAirtime as AirtimeSlots | undefined) ?? undefined;
       const parsed = parseAirtime(msg.text);
       const airtimeTurn =
@@ -71,6 +111,7 @@ export function createPipeline(deps: {
         const exec = await new Executor(skills, getMemory()).run(
           { steps: [{ skill: "check_balance", params: {}, dependsOn: [] }] },
           msg.userId,
+          { channel: msg.channel },
         );
         replies = exec.replies.length > 0 ? exec.replies : [menuMessage()];
         steps = 1;
@@ -86,11 +127,14 @@ export function createPipeline(deps: {
           const ctx = { ...(session?.context ?? {}) };
           delete (ctx as Record<string, unknown>).pendingAirtime;
           await sessions.patch(msg.channel, msg.userId, { context: ctx });
-          const exec = await new Executor(skills, getMemory()).run(
-            { steps: [{ skill: "buy_airtime", params: { ...merged } as Record<string, unknown>, dependsOn: [] }] },
-            msg.userId,
-          );
-          replies = exec.replies.length > 0 ? exec.replies : [menuMessage()];
+          const outcome = await runner.start({
+            userId: msg.userId,
+            channel: msg.channel,
+            goal: `buy ${merged.amount} NGN ${merged.network ?? ""} airtime for ${merged.phone}`.replace(/\s+/g, " "),
+            playbookId: "airtime",
+            context: { slots: merged as Record<string, unknown> },
+          });
+          replies = outcome.replies.length > 0 ? outcome.replies : [menuMessage()];
           steps = 1;
         }
       } else {
@@ -106,38 +150,54 @@ export function createPipeline(deps: {
         });
         steps = p.steps.length;
         if (p.steps.length > 0) {
-          const exec = await new Executor(skills, getMemory()).run(p, msg.userId);
+          const exec = await new Executor(skills, getMemory()).run(
+            p,
+            msg.userId,
+            { channel: msg.channel },
+          );
           replies = exec.replies.length > 0 ? exec.replies : [menuMessage()];
         } else {
           replies = [menuMessage()];
         }
       }
 
-      // Localize English-authored replies into the session language, if one is
-      // set. Protected terms (names, addresses) pass through byte-identical.
-      const language = session?.language ?? languages.fallback;
-      let out = replies;
-      if (languages.enabled && language !== languages.fallback) {
-        out = await localizeReplies(
-          modelProvider,
-          conversationId,
-          replies,
-          language,
-          languages,
-          collectProtectedTerms(session),
-        );
-      }
-
-      for (const reply of out) {
-        await recordOutbound(conversations, msg.channel, msg.userId, reply, {
-          vertical: session?.vertical,
-          step: session?.step,
-        });
-      }
-      log.info({ conversationId, steps, airtime: airtimeTurn }, "pipeline.turn");
-      return out;
+      await finish(msg, conversations, session, conversationId, replies, steps, inboundId);
+      return replies;
     },
   };
+}
+
+/** Localize, record outbound, mark inbound processed, log. Shared tail. */
+async function finish(
+  msg: InboundMessage,
+  conversations: ConversationStore,
+  session: SessionState | null,
+  conversationId: string,
+  replies: OutboundMessage[],
+  steps: number,
+  inboundId: string,
+): Promise<void> {
+  await getCaseStore().markInboundProcessed(inboundId).catch(() => {});
+  const language = session?.language ?? languages.fallback;
+  let out = replies;
+  if (languages.enabled && language !== languages.fallback) {
+    out = await localizeReplies(
+      modelProvider,
+      conversationId,
+      replies,
+      language,
+      languages,
+      collectProtectedTerms(session),
+    );
+  }
+
+  for (const reply of out) {
+    await recordOutbound(conversations, msg.channel, msg.userId, reply, {
+      vertical: session?.vertical,
+      step: session?.step,
+    });
+  }
+  log.info({ conversationId, steps }, "pipeline.turn");
 }
 
 /** Terms that must survive localization byte-identical: vendor/item names held in
