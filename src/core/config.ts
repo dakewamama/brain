@@ -73,6 +73,15 @@ const schema = z.object({
   // Telegram's secret_token, echoed back in x-telegram-bot-api-secret-token.
   // Enforced when set.
   TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
+  // Policy engine limits (NGN). MAX_TRANSACTION_NGN: per-transaction ceiling for
+  // money capabilities. CONFIRM_THRESHOLD_NGN: amounts at/above this need an
+  // explicit user confirmation before execution (high-risk capabilities always do).
+  MAX_TRANSACTION_NGN: z.coerce.number().default(50000),
+  CONFIRM_THRESHOLD_NGN: z.coerce.number().default(20000),
+  // How long (ms) a case may stay IN_DOUBT before the reconciler flags it loud.
+  RECONCILE_POLL_MS: z.coerce.number().default(30000),
+  // Case runtime worker cadence (ms) for timers (deadlines, wake-ups).
+  CASE_WORKER_POLL_MS: z.coerce.number().default(5000),
 });
 
 export type Config = z.infer<typeof schema>;

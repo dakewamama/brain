@@ -1,4 +1,5 @@
 import express, { type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { getConfig } from "./core/config.js";
 import { childLogger } from "./core/logger.js";
 import { sessionStore, conversationStore } from "./store/index.js";
@@ -11,7 +12,8 @@ import { browse, browseEnabled } from "./browse/serper.js";
 import { secretOk, bearer } from "./router/webhookAuth.js";
 import { getAuth } from "./auth/index.js";
 import { AuthError } from "./auth/auth.js";
-import type { ChannelId, OutboundMessage } from "./core/types.js";
+import { getCaseStore, getCaseRunner } from "./cases/index.js";
+import type { ChannelId, InboundMessage, OutboundMessage } from "./core/types.js";
 const log = childLogger("server");
 
 export function createServer() {
@@ -24,6 +26,70 @@ export function createServer() {
   const whatsapp = new WhatsAppAdapter();
   const telegram = new TelegramAdapter();
   const web = new WebAdapter();
+
+  /**
+   * Durable acceptance for push channels: PERSIST (dedupe) → ACK → process
+   * async. A crash after the ack leaves the inbound row unprocessed; the sweep
+   * below retries it until it is marked processed. Dedupe: a replayed message
+   * id is dropped, never processed twice.
+   */
+  const acceptAsync = async (
+    channel: string,
+    messages: InboundMessage[],
+    send: (userId: string, replies: OutboundMessage[]) => Promise<void>,
+  ) => {
+    const claimed: InboundMessage[] = [];
+    for (const msg of messages) {
+      const ok = await getCaseStore().claimInbound({
+        id: `inb_${randomUUID()}`,
+        channel,
+        providerMessageId: msg.messageId ?? `anon-${randomUUID()}`,
+        payload: msg as unknown as Record<string, unknown>,
+      });
+      if (ok) claimed.push(msg);
+      else log.info({ channel, messageId: msg.messageId }, "duplicate inbound dropped");
+    }
+    void (async () => {
+      for (const msg of claimed) {
+        try {
+          const replies = await pipeline.process(msg, { skipClaim: true });
+          await send(msg.userId, replies);
+        } catch (err) {
+          // Row stays unprocessed; the sweep retries.
+          log.error({ err, channel, messageId: msg.messageId }, "inbound processing failed; sweep will retry");
+        }
+      }
+    })();
+  };
+
+  // Retry sweep for inbound events that were persisted but never processed
+  // (crash between ack and completion). Runs on the worker cadence.
+  const sweepUnprocessed = () => {
+    void (async () => {
+      try {
+        const rows = await getCaseStore().listUnprocessedInbound(20);
+        for (const row of rows) {
+          const msg = row.payload as unknown as InboundMessage;
+          if (!msg?.channel || !msg?.userId) {
+            await getCaseStore().markInboundProcessed(row.id);
+            continue;
+          }
+          try {
+            const replies = await pipeline.process(msg, { skipClaim: true });
+            const adapter = msg.channel === "whatsapp" ? whatsapp : msg.channel === "telegram" ? telegram : null;
+            if (adapter) await adapter.send(msg.userId, replies);
+            await getCaseStore().markInboundProcessed(row.id);
+          } catch (err) {
+            log.warn({ err: String(err), inboundId: row.id }, "sweep retry failed; will retry again");
+          }
+        }
+      } catch (err) {
+        log.error({ err: String(err) }, "unprocessed-inbound sweep failed");
+      }
+    })();
+  };
+  const sweepTimer = setInterval(sweepUnprocessed, Math.max(5000, cfg.CASE_WORKER_POLL_MS));
+  sweepTimer.unref?.();
 
   // Warn once at boot if a public webhook is unauthenticated. Enforcement is
   // per-request below; this makes an unset token loud instead of silent.
@@ -86,15 +152,13 @@ export function createServer() {
       res.sendStatus(401);
       return;
     }
-    res.sendStatus(200);
     try {
       const { messages } = whatsapp.parseInbound(req.body);
-      for (const msg of messages) {
-        const replies = await pipeline.process(msg);
-        await whatsapp.send(msg.userId, replies);
-      }
+      res.sendStatus(200); // ack after durable claim (acceptAsync persisted first)
+      await acceptAsync("whatsapp", messages, (userId, replies) => whatsapp.send(userId, replies));
     } catch (err) {
       log.error({ err }, "error handling WhatsApp webhook");
+      res.sendStatus(200); // parse bugs shouldn't cause endless redelivery
     }
   });
   app.post("/webhooks/telegram", async (req: Request, res: Response) => {
@@ -107,15 +171,13 @@ export function createServer() {
         return;
       }
     }
-    res.sendStatus(200);
     try {
       const { messages } = telegram.parseInbound(req.body);
-      for (const msg of messages) {
-        const replies = await pipeline.process(msg);
-        await telegram.send(msg.userId, replies);
-      }
+      res.sendStatus(200);
+      await acceptAsync("telegram", messages, (userId, replies) => telegram.send(userId, replies));
     } catch (err) {
       log.error({ err }, "error handling Telegram webhook");
+      res.sendStatus(200);
     }
   });
   app.post("/webhooks/web", async (req: Request, res: Response) => {
@@ -131,7 +193,15 @@ export function createServer() {
       const { messages } = web.parseInbound(req.body);
       const replies: OutboundMessage[] = [];
       for (const msg of messages) {
-        const out = await pipeline.process(msg);
+        // Web is a synchronous channel: claim, process inline, reply.
+        const claimed = await getCaseStore().claimInbound({
+          id: `inb_${randomUUID()}`,
+          channel: msg.channel,
+          providerMessageId: msg.messageId ?? `anon-${randomUUID()}`,
+          payload: msg as unknown as Record<string, unknown>,
+        });
+        if (!claimed) continue; // replay
+        const out = await pipeline.process(msg, { skipClaim: true });
         await web.send(msg.userId, out);
         replies.push(...out);
       }
@@ -288,5 +358,14 @@ export function createServer() {
     const since = Number(req.query.since ?? 0);
     res.json(await conversationStore.since(since));
   });
-  return { app, cfg };
+  // Case inspection for operations. Same admin bearer gate as above.
+  app.get("/admin/cases/:id", async (req: Request, res: Response) => {
+    const status = await getCaseRunner().status(String(req.params.id));
+    if (!status) {
+      res.sendStatus(404);
+      return;
+    }
+    res.json(status);
+  });
+  return { app, cfg, adapters: { whatsapp, telegram } };
 }

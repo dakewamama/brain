@@ -33,7 +33,7 @@ export class Executor {
     private memory: MemoryService,
   ) {}
 
-  async run(plan: Plan, userId: string): Promise<ExecutionResult> {
+  async run(plan: Plan, userId: string, opts?: { channel?: string }): Promise<ExecutionResult> {
     const replies: OutboundMessage[] = [];
     const priorResults: Record<number, unknown> = {};
 
@@ -67,6 +67,7 @@ export class Executor {
 
       const outcome = await skill.execute(resolved.params, {
         userId,
+        channel: opts?.channel,
         memory: this.memory,
         priorResults,
       });

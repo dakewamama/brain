@@ -6,6 +6,7 @@ import {
   InMemoryConversationStore,
 } from "../src/store/memory.js";
 import { flattenOutbound } from "../src/core/recorder.js";
+import { configureCasesForTests } from "../src/cases/index.js";
 import type { InboundMessage } from "../src/core/types.js";
 
 function freshPipeline() {
@@ -13,12 +14,13 @@ function freshPipeline() {
   const conversations = new InMemoryConversationStore();
   const pipeline = createPipeline({ sessions, conversations });
   const userId = "u1";
-  async function say(text: string, data?: Record<string, unknown>) {
+  async function say(text: string, data?: Record<string, unknown>, messageId?: string) {
     const msg: InboundMessage = {
       channel: "console",
       userId,
       text,
       data,
+      messageId,
       timestamp: Date.now(),
     };
     const replies = await pipeline.process(msg);
@@ -43,16 +45,34 @@ test("axis never emits a direct link", async () => {
 });
 
 test("airtime is multi-turn: asks for the network, then resumes on the answer", async () => {
+  // The completed slots start a real Case; the mock balance says insufficient,
+  // which proves the message traveled the whole runtime path and back.
+  configureCasesForTests({
+    purchase: async () => ({ ok: true, outcome: "ok", response: { providerStatus: "delivered" } }),
+    getBalance: async () => ({ ok: true, ngn: 0, usdc: 0, address: "TestAddr123" }),
+  });
   const { say } = freshPipeline();
   // 0801 isn't an inferable prefix and no network stated -> it must ask.
   const r1 = await say("buy 200 airtime for 08012345678");
   assert.match(r1, /which network/i);
-  // The follow-up answer resumes the pending request (reaches buy_airtime, which
-  // without onboarding configured reports it can't buy — proving it got there,
-  // not the generic greeting).
+  // The follow-up answer resumes the pending request (reaches the airtime
+  // playbook, which reports the empty balance — proving it got there, not the
+  // generic greeting).
   const r2 = await say("MTN");
   assert.doesNotMatch(r2, /transfers and bills are coming/i); // not the fallback
-  assert.match(r2, /airtime|couldn't buy|balance/i);
+  assert.match(r2, /balance/i);
+});
+
+test("a replayed webhook message id is processed once, not twice", async () => {
+  configureCasesForTests({
+    purchase: async () => ({ ok: true, outcome: "ok", response: { providerStatus: "delivered" } }),
+    getBalance: async () => ({ ok: false, ngn: null, usdc: 0 }),
+  });
+  const { say } = freshPipeline();
+  const first = await say("buy 200 airtime for 08012345678", undefined, "wamid.test-1");
+  assert.match(first, /which network/i);
+  const replay = await say("buy 200 airtime for 08012345678", undefined, "wamid.test-1");
+  assert.equal(replay, "", "duplicate inbound is dropped");
 });
 
 test("every message is recorded in the conversation store", async () => {
