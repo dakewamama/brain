@@ -1,17 +1,20 @@
 {
   "name": "axis",
   "version": "0.1.0",
-  "description": "Conversational commerce layer for Nigeria — one chat, many services.",
+  "description": "Policy-bounded MCP-native durable execution runtime",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/mcp/main.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
+    "dev": "tsx watch src/mcp/main.ts",
+    "build": "tsc && node scripts/copy-migrations.mjs",
+    "start": "node dist/mcp/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts tests/cases/*.test.ts tests/gateway/*.test.ts",
     "console": "tsx src/console.ts",
-    "eval:planner": "tsx src/eval/run.ts"
+    "eval:planner": "tsx src/eval/run.ts",
+    "admin": "tsx src/mcp/admin.ts",
+    "test:postgres": "node scripts/test-postgres.mjs",
+    "legacy:dev": "tsx watch src/index.ts"
   },
   "keywords": [
     "whatsapp",
