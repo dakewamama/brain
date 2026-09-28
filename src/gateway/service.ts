@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Pool } from "pg";
 import { CaseRunner } from "../cases/runtime.js";
@@ -7,6 +7,7 @@ import type { Transition } from "../cases/types.js";
 import { CapabilityRegistry, permitted, rejectAuthorityControls, type Dispatch, type CapabilityDescriptor, type Invocation, type MoneyRequirement, type ProviderResult } from "../capabilities/registry.js";
 import { GrantService, AxisError, type Principal } from "../grants/service.js";
 import { ContextService } from "../context/service.js";
+import { hasCurrentProof } from "../proof/gate.js";
 import { authorizeExecution } from "../policy/execution.js";
 
 const argsSchema=z.record(z.unknown());
@@ -16,12 +17,8 @@ export const statusSchema=z.object({workId:z.string().min(1)}).strict();
 export const cancelSchema=z.object({workId:z.string().min(1)}).strict();
 export const searchSchema=z.object({query:z.string().max(500).optional(),region:z.string().optional(),limit:z.number().int().min(1).max(5).optional(),modes:z.array(z.enum(["LIVE","SANDBOX","MOCK","HANDOFF","UPSTREAM_MCP"])).optional(),risks:z.array(z.enum(["read","write","financial","external_commitment"])).optional()}).strict();
 export const invokeSchema=z.object({capabilityId:z.string(),arguments:argsSchema,idempotencyKey:z.string().min(1).max(200)}).strict();
-function canonical(v: unknown): string {
-  if(Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
-  if(v!==null && typeof v==="object") return `{${Object.entries(v).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`;
-  return JSON.stringify(v);
-}
-export const digest=(v:unknown) => createHash("sha256").update(canonical(v)).digest("hex");
+export { digest } from "../core/digest.js";
+import { digest } from "../core/digest.js";
 interface Proposal {
   understoodGoal:string; constraints:z.infer<typeof prepareSchema>["constraints"]; actions:{capabilityId:string;version:string;arguments:Record<string,unknown>;descriptorDigest:string}[];
   requiredApprovals:string[];missingInformation:string[];knownCost:null;executionPossible:boolean;
@@ -155,7 +152,7 @@ export class AxisGateway {
           const total=await db.query("SELECT COALESCE(SUM(amount_minor),0)::text AS total FROM action_money WHERE grant_id=$1 AND state NOT IN ('RELEASED','REVERSED','REFUNDED')",[p.grantId]);
           if(!fresh.authority.financial || BigInt(total.rows[0].total)+BigInt(money.amountMinor)>BigInt(fresh.authority.financial.totalMinor)) throw new AxisError("financial_limit");
         }
-        await db.query("INSERT INTO actions(id,case_id,capability,status,input,idempotency_key) VALUES ($1,$2,$3,'authorized',$4,$1)",[id,prep.case_id,descriptor.id,{arguments:prep.proposal.actions[0].arguments,verificationRisk:descriptor.risk}]);
+        await db.query("INSERT INTO actions(id,case_id,capability,status,input,idempotency_key) VALUES ($1,$2,$3,'authorized',$4,$1)",[id,prep.case_id,descriptor.id,{arguments:prep.proposal.actions[0].arguments,verificationRisk:descriptor.risk,...(money?{moneyRequirement:money}:{})}]);
         if(money) {
           await db.query("INSERT INTO action_money(action_id,grant_id,asset,amount_minor,state) VALUES ($1,$2,$3,$4,'RESERVED')",[id,p.grantId,money.asset,money.amountMinor]);
           await db.query("INSERT INTO reservations(id,action_id,owner,amount_minor,asset,status) VALUES ($1,$1,$2,$3,$4,'reserved')",[id,p.userId,money.amountMinor,money.asset]);
@@ -190,7 +187,7 @@ export class AxisGateway {
     const requirements=descriptor?this.registry.requirements(descriptor.id,prep.proposal.actions[0].arguments).context:[];
     const visible=requirements.every(t=>p.authority.contextTypes.includes(t)&&p.authority.scopes.includes(`context:${t}`));
     return {workId:c.id,preparationId:prep.id,status:mapping[c.status],summary:c.goal,mode:descriptor?.mode??"UNAVAILABLE",providerMode:descriptor?.metadata?.executionMode??descriptor?.mode??"UNAVAILABLE",actionId:action?.id,
-      money:money??null,verification:evidence.some(e=>e.kind==="verification")?"VERIFIED":"UNVERIFIED",
+      money:money??null,verification:await hasCurrentProof(this.store,c.id)?"VERIFIED":"UNVERIFIED",
       evidence:evidence.map(e=>({kind:e.kind,at:e.at.toISOString()})),
       result:visible && c.status==="completed" ? action?.result?.data ?? null : null,
       nextRequiredAction:c.status==="waiting_user"?"User approval required":c.status==="in_doubt"?"Reconcile the original provider request":c.status==="verifying"?"Obtain authoritative evidence":null};

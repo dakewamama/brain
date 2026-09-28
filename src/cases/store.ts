@@ -9,6 +9,7 @@
  *    first arrival owns processing.
  * Unique inserts decide ownership; a fresh snapshot reads a concurrent winner.
  */
+import { hasCurrentProof } from "../proof/gate.js";
 import type { Pool, PoolClient } from "pg";
 import {
   type CaseRecord,
@@ -204,10 +205,7 @@ export class PgCaseStore implements CaseStore {
     id: string,
     patch: Partial<Pick<CaseRecord, "state" | "status" | "context" | "wakeAt" | "deadlineAt">>,
   ): Promise<CaseRecord | null> {
-    if (patch.status === "completed") {
-      const proof = await this.pool.query("SELECT 1 FROM evidence WHERE case_id=$1 AND kind='verification' AND payload->>'verified'='true'", [id]);
-      if (!proof.rowCount) throw new Error("completion requires Axis proof");
-    }
+    if(patch.status === "completed" && !await hasCurrentProof(this,id)) throw new Error("completion requires current Axis proof");
     const sets: string[] = [];
     const vals: unknown[] = [];
     let n = 1;
@@ -519,7 +517,7 @@ export class InMemoryCaseStore implements CaseStore {
     id: string,
     patch: Partial<Pick<CaseRecord, "state" | "status" | "context" | "wakeAt" | "deadlineAt">>,
   ): Promise<CaseRecord | null> {
-    if(patch.status === "completed" && !(this.evidence.get(id) ?? []).some(e=>e.kind === "verification" && e.payload.verified === true)) throw new Error("completion requires Axis proof");
+    if(patch.status === "completed" && !await hasCurrentProof(this,id)) throw new Error("completion requires current Axis proof");
     const c = this.cases.get(id);
     if (!c) return null;
     Object.assign(c, patch, { updatedAt: new Date() });

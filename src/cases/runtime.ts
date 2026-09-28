@@ -238,7 +238,7 @@ export class CaseRunner {
           await this.store.updateCase(caseId, { context: t.context ?? {} });
           await this.complete(caseId, t.complete.summary);
           const done = (await this.store.getCase(caseId))!;
-          return this.outcome(done, true, ctx.pendingReplies);
+          return this.outcome(done, done.status === "completed", ctx.pendingReplies);
         }
         case "fail": {
           const t = transition as Extract<Transition, { fail: unknown }>;

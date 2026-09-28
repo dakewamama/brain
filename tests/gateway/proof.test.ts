@@ -28,3 +28,14 @@ test("a stale wake snapshot cannot revive a cancelled Case",async()=>{
  store.listWakeable=async now=>{const snapshot=await original(now);await store.updateCase(c.id,{status:"cancelled"});return snapshot;};
  await runner.wakeDueCases();assert.equal(calls,0);assert.equal((await store.getCase(c.id))?.status,"cancelled");
 });
+test("a later attempt invalidates earlier proof and cannot silently complete again",async()=>{
+ const store=new InMemoryCaseStore();await store.createCase({id:"c",userId:"u",channel:"test",goal:"g",playbook:"p",state:"s"});
+ await store.createAction({id:"a",caseId:"c",capability:"read",idempotencyKey:"a",input:{verificationRisk:"read"}});
+ await store.updateActionStatus("a","settled");
+ await store.appendAttempt({id:"t",actionId:"a",provider:"read",mode:"LIVE",request:{},outcome:"ok",response:{value:1}});
+ await store.addEvidence({id:"e",caseId:"c",actionId:"a",kind:"provider_receipt",payload:{value:1}});
+ assert.equal(await verifyCompletion(store,"c"),true);await store.updateCase("c",{status:"completed"});
+ await store.appendAttempt({id:"t2",actionId:"a",provider:"read",mode:"LIVE",request:{},outcome:"unknown"});
+ await assert.rejects(store.updateCase("c",{status:"completed"}),/current Axis proof/);
+ assert.equal(await verifyCompletion(store,"c"),false);
+});

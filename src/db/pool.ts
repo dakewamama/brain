@@ -33,30 +33,22 @@ export async function closePool(): Promise<void> {
 export async function migrate(): Promise<void> {
   const p = getPool();
   if (!p) throw new Error("migrate() requires DATABASE_URL");
-  await p.query(
-    `CREATE TABLE IF NOT EXISTS schema_migrations (
-       version text PRIMARY KEY,
-       applied_at timestamptz NOT NULL DEFAULT now()
-     )`,
-  );
-  const dir = join(dirname(fileURLToPath(import.meta.url)), "migrations");
-  const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
-  for (const file of files) {
-    const applied = await p.query("SELECT 1 FROM schema_migrations WHERE version = $1", [file]);
-    if (applied.rowCount && applied.rowCount > 0) continue;
-    const sql = readFileSync(join(dir, file), "utf8");
-    const client = await p.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query(sql);
-      await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [file]);
-      await client.query("COMMIT");
-      log.info({ migration: file }, "applied migration");
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
+  const client=await p.connect();
+  // Serialize startup migrations per schema using a session-scoped PG lock.
+  // No check-then-create race when two application processes start together.
+  const lock="hashtextextended(current_database() || ':' || current_schema() || ':axis-migrations',0)";
+  try {
+    await client.query(`SELECT pg_advisory_lock(${lock})`);
+    await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`);
+    const dir=join(dirname(fileURLToPath(import.meta.url)),"migrations");
+    const files=readdirSync(dir).filter(f=>f.endsWith(".sql")).sort();
+    for(const file of files) {
+      if((await client.query("SELECT 1 FROM schema_migrations WHERE version=$1",[file])).rowCount) continue;
+      try {
+        await client.query("BEGIN");await client.query(readFileSync(join(dir,file),"utf8"));
+        await client.query("INSERT INTO schema_migrations(version) VALUES ($1)",[file]);await client.query("COMMIT");
+        log.info({migration:file},"applied migration");
+      }catch(error){await client.query("ROLLBACK");throw error;}
     }
-  }
+  }finally{await client.query(`SELECT pg_advisory_unlock(${lock})`);client.release();}
 }
