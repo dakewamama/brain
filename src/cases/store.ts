@@ -162,9 +162,15 @@ function rowToAction(r: Record<string, unknown>): ActionRecord {
 export class PgCaseStore implements CaseStore {
   constructor(private pool: Pool) {}
   async exclusive<T>(caseId: string, fn: () => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
-    try { await client.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [caseId]); return await fn(); }
-    finally { await client.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [caseId]); client.release(); }
+    // Never occupy the pool with blocked advisory-lock waiters: the owner needs
+    // other connections to persist work while holding this session lock.
+    for (;;) {
+      const client = await this.pool.connect();
+      const r = await client.query("SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS acquired", [caseId]);
+      if (!r.rows[0].acquired) { client.release(); await new Promise(resolve => setTimeout(resolve, 10)); continue; }
+      try { return await fn(); }
+      finally { await client.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [caseId]); client.release(); }
+    }
   }
   async listActions(caseId: string): Promise<ActionRecord[]> {
     return (await this.pool.query("SELECT * FROM actions WHERE case_id=$1 ORDER BY created_at", [caseId])).rows.map(rowToAction);

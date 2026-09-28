@@ -32,6 +32,7 @@ export interface CapabilityAdapter {
   execute(args: Record<string, unknown>, context: ProviderContext): Promise<ProviderResult>;
   requery?(args: Record<string, unknown>, context: ProviderContext): Promise<ProviderResult>;
   money?(args: Record<string, unknown>): MoneyRequirement;
+  resources?(args: Record<string, unknown>): string[];
   requiredContext?(args: Record<string, unknown>): string[];
 }
 export interface Invocation { capabilityId: string; arguments: Record<string, unknown>; idempotencyKey: string }
@@ -76,9 +77,9 @@ export class CapabilityRegistry {
     const e=this.entries.get(id);
     if(!e || !e.input(args)) throw new AxisError("invalid_arguments");
   }
-  requirements(id: string, args: Record<string,unknown>): { context: string[]; money?: MoneyRequirement } {
+  requirements(id: string, args: Record<string,unknown>): { context: string[]; resources: string[]; money?: MoneyRequirement } {
     const e=this.entries.get(id); if(!e) throw new AxisError("capability_unavailable");
-    return {context:[...new Set([...e.descriptor.contextTypes,...(e.adapter.requiredContext?.(args)??[])])], money:e.adapter.money?.(args)};
+    return {resources:e.adapter.resources?.(args)??[],context:[...new Set([...e.descriptor.contextTypes,...(e.adapter.requiredContext?.(args)??[])])], money:e.adapter.money?.(args)};
   }
   /** One-time wiring to the trusted execution service. Provider dispatch is not
    * returned by get/search and is never part of the external tool interface. */
