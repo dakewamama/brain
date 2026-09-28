@@ -38,7 +38,8 @@ export interface CapabilityAdapter {
 export interface Invocation { capabilityId: string; arguments: Record<string, unknown>; idempotencyKey: string }
 export interface Discovery { query?: string; region?: string; modes?: CapabilityDescriptor["mode"][]; risks?: CapabilityDescriptor["risk"][]; limit?: number }
 export function permitted(p: Principal, d: CapabilityDescriptor): boolean {
-  return p.authority.capabilities.includes(d.id) && d.requiredScopes.every(s => p.authority.scopes.includes(s)) &&
+  return !(process.env.NODE_ENV === "production" && (d.mode === "MOCK" || d.mode === "SANDBOX" || d.metadata?.executionMode === "SANDBOX")) &&
+    (!Array.isArray(d.metadata?.requiredResources) || d.metadata.requiredResources.every(r=>typeof r==="string"&&p.authority.resources.includes(r))) && p.authority.capabilities.includes(d.id) && d.requiredScopes.every(s => p.authority.scopes.includes(s)) &&
     d.mode !== "UNAVAILABLE" && p.authority.modes.includes(d.mode) && d.health === "healthy";
 }
 export function rejectAuthorityControls(value: unknown): void {
@@ -51,7 +52,7 @@ export function rejectAuthorityControls(value: unknown): void {
 /** Only Axis execution receives this closure. Registry.invoke never calls a provider. */
 export type Dispatch = (id: string, args: Record<string,unknown>, context: ProviderContext, requery?: boolean) => Promise<ProviderResult>;
 export class CapabilityRegistry {
-  private entries = new Map<string, { descriptor: CapabilityDescriptor; adapter: CapabilityAdapter; input: ValidateFunction; output: ValidateFunction }>();
+  private entries = new Map<string, { descriptor: CapabilityDescriptor; adapter: CapabilityAdapter; input: ValidateFunction; output: ValidateFunction; compatibility?: unknown }>();
   private ajv = new Ajv({ strict: false, allErrors: true });
   private execution?: (principal: Principal, invocation: Invocation) => Promise<unknown>;
   register(descriptor: CapabilityDescriptor, adapter: CapabilityAdapter): void {
@@ -60,6 +61,17 @@ export class CapabilityRegistry {
     if (!d.inputSchema || !d.outputSchema) throw new AxisError("missing_schema");
     this.entries.set(d.id, { descriptor: d, adapter, input: this.ajv.compile(d.inputSchema as object), output: this.ajv.compile(d.outputSchema as object) });
   }
+  /** Deprecated channel-facing facades share catalog storage. They are never
+   * exported as callable Gateway capabilities; migration does not confer grants. */
+  registerCompatibility(descriptor: CapabilityDescriptor, value: unknown, replace = false): void {
+    const old=this.entries.get(descriptor.id);
+    if(old && (!replace || !old.compatibility)) throw new AxisError("duplicate_capability");
+    if(old) this.entries.delete(descriptor.id);
+    this.register(descriptor,{async execute(){throw new AxisError("legacy_capability_requires_migration");}});
+    this.entries.get(descriptor.id)!.compatibility=value;
+  }
+  compatibility<T>(id: string): T | undefined { return this.entries.get(id)?.compatibility as T | undefined; }
+  compatibilityList<T>(): T[] { return [...this.entries.values()].flatMap(e=>e.compatibility?[e.compatibility as T]:[]); }
   get(id: string): CapabilityDescriptor | undefined { const d=this.entries.get(id)?.descriptor; return d && structuredClone(d); }
   setHealth(id: string, health: CapabilityDescriptor["health"]): void { const e=this.entries.get(id); if(e) e.descriptor.health=health; }
   listAuthorized(p: Principal): CapabilityDescriptor[] { return [...this.entries.values()].map(e=>e.descriptor).filter(d=>permitted(p,d)).map(d=>structuredClone(d)); }

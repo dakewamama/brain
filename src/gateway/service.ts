@@ -37,7 +37,7 @@ export class AxisGateway {
   readonly context:ContextService;
   private dispatch:Dispatch;
   constructor(readonly pool:Pool,readonly registry:CapabilityRegistry) {
-    this.store=new PgCaseStore(pool);this.runner=new CaseRunner(this.store);this.grants=new GrantService(pool);this.context=new ContextService(pool);
+    this.store=new PgCaseStore(pool);this.runner=new CaseRunner(this.store,"LIVE",registry);this.grants=new GrantService(pool);this.context=new ContextService(pool);
     this.dispatch=registry.bindExecution((p,i)=>this.invokeFor(p,i));
     this.runner.registerPlaybook({id:"gateway-v1",initialState:"execute",states:{execute:{onEnter:ctx=>this.runAction(ctx.caseId)}}});
     this.runner.registerReconciler("gateway-v1",async id=>{
@@ -189,7 +189,7 @@ export class AxisGateway {
     const mapping:Record<string,string>={prepared:"PREPARED",waiting_user:"WAITING_APPROVAL",waiting_timeout:action?.status==="authorized"?"QUEUED":"WAITING_EXTERNAL",running:"EXECUTING",in_doubt:"IN_DOUBT",verifying:"VERIFYING",completed:"COMPLETED",failed:"FAILED",cancelled:"CANCELLED"};
     const requirements=descriptor?this.registry.requirements(descriptor.id,prep.proposal.actions[0].arguments).context:[];
     const visible=requirements.every(t=>p.authority.contextTypes.includes(t)&&p.authority.scopes.includes(`context:${t}`));
-    return {workId:c.id,preparationId:prep.id,status:mapping[c.status],summary:c.goal,mode:descriptor?.mode??"UNAVAILABLE",actionId:action?.id,
+    return {workId:c.id,preparationId:prep.id,status:mapping[c.status],summary:c.goal,mode:descriptor?.mode??"UNAVAILABLE",providerMode:descriptor?.metadata?.executionMode??descriptor?.mode??"UNAVAILABLE",actionId:action?.id,
       money:money??null,verification:evidence.some(e=>e.kind==="verification")?"VERIFIED":"UNVERIFIED",
       evidence:evidence.map(e=>({kind:e.kind,at:e.at.toISOString()})),
       result:visible && c.status==="completed" ? action?.result?.data ?? null : null,

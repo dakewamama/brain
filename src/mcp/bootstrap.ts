@@ -1,16 +1,6 @@
-/**
- * MCP bootstrap — auto-register the tools of configured MCP servers as skills.
- *
- * Every tool an MCP server exposes becomes an atomic skill the Planner can pick
- * and the Executor can run, with zero custom integration code. Config comes from
- * MCP_SERVERS (JSON). Child processes get ONLY an allowlisted, non-secret base
- * env plus what each server explicitly declares (`env` values and `passEnv`
- * names) — brain's secrets (Paj key, internal token) are never handed to a
- * third-party MCP package. Tool output is sanitized before it can reach a user.
- * Inert when unconfigured; a failing server is skipped, never fatal.
- */
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+/** Legacy channel compatibility helpers. Automatic upstream execution is
+ * disabled. The governed SDK client lives in upstream.ts; MCP handlers call
+ * AxisGateway. Keep childEnv's explicit secret allowlist for stdio children. */
 import type { JsonSchema } from "../model/types.js";
 import type {
   SkillManifest,
@@ -109,7 +99,7 @@ interface McpToolShape {
 export function toSkill(
   serverName: string,
   tool: McpToolShape,
-  call: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+  _call: (name: string, args: Record<string, unknown>) => Promise<unknown>,
 ): SkillManifest {
   return {
     id: `${serverName}.${tool.name}`,
@@ -117,9 +107,8 @@ export function toSkill(
     description: tool.description ?? `${serverName} ${tool.name}`,
     parameters: (tool.inputSchema as JsonSchema) ?? { type: "object" },
     origin: "learned",
-    execute: async (params): Promise<SkillOutcome> => {
-      const result = await call(tool.name, params);
-      return mcpResultToOutcome(result);
+    execute: async (): Promise<SkillOutcome> => {
+      throw new Error("MCP invocation requires an Axis Gateway Grant");
     },
   };
 }
@@ -149,40 +138,9 @@ export function mcpResultToOutcome(result: unknown): SkillOutcome {
   };
 }
 
-/** Connect to each configured server and register its tools. Best-effort. */
-export async function registerMcpTools(
-  skills: SkillRegistry,
-  servers: McpServerConfig[],
-): Promise<number> {
-  let registered = 0;
-  for (const server of servers) {
-    try {
-      const transport = new StdioClientTransport({
-        command: server.command,
-        args: server.args ?? [],
-        env: childEnv(server, process.env),
-      });
-      const client = new Client({ name: "axis-brain", version: "1.0.0" });
-      await client.connect(transport);
-      const { tools } = await client.listTools();
-      for (const tool of tools) {
-        skills.register(
-          toSkill(server.name, tool as McpToolShape, (name, args) =>
-            client.callTool({ name, arguments: args }),
-          ),
-        );
-        registered++;
-      }
-      log.info(
-        { server: server.name, tools: tools.length },
-        "registered MCP tools as skills",
-      );
-    } catch (err) {
-      log.warn(
-        { server: server.name, err: (err as Error).message },
-        "MCP server unavailable; skipping",
-      );
-    }
-  }
-  return registered;
+/** @deprecated Discovery cannot authorize execution. Configure AXIS_UPSTREAM_MCP
+ * on the MCP entrypoint instead. Legacy channel bootstrap never starts providers. */
+export async function registerMcpTools(_skills: SkillRegistry, servers: McpServerConfig[]): Promise<number> {
+  if(servers.length) log.warn("Legacy MCP_SERVERS disabled; use the governed Axis MCP Gateway");
+  return 0;
 }

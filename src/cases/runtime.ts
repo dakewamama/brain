@@ -18,6 +18,7 @@
  * reconcileInDoubt) is the seam a different executor (e.g. Hatchet) would
  * implement; playbooks never see it.
  */
+import { CapabilityRegistry } from "../capabilities/registry.js";
 import { verifyCompletion } from "../proof/gate.js";
 import { randomUUID } from "node:crypto";
 import type {
@@ -80,12 +81,13 @@ const MAX_HOPS = 20;
 
 export class CaseRunner {
   private playbooks = new Map<string, Playbook>();
-  private capabilities = new Map<string, CapabilityExecutor>();
+
   private reconcilers = new Map<string, (caseId: string) => Promise<void>>();
 
   constructor(
     private store: CaseStore,
     private mode: ExecutionMode = "LIVE",
+    readonly capabilities = new CapabilityRegistry(),
   ) {}
 
   registerPlaybook(pb: Playbook): void {
@@ -94,11 +96,11 @@ export class CaseRunner {
   }
 
   registerCapability(exec: CapabilityExecutor): void {
-    this.capabilities.set(exec.capability, exec);
+    this.capabilities.registerCompatibility({id:exec.capability,version:"legacy",provider:{id:exec.provider,kind:"external_api"},description:exec.capability,inputSchema:{type:"object"},outputSchema:{type:"object"},mode:"UNAVAILABLE",risk:"financial",requiredScopes:["legacy.disabled"],reversible:false,contextTypes:[],health:"unhealthy"},exec);
   }
 
   capability(capability: string): CapabilityExecutor | undefined {
-    return this.capabilities.get(capability);
+    return this.capabilities.compatibility<CapabilityExecutor>(capability);
   }
 
   executionMode(): ExecutionMode {
