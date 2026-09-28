@@ -1,111 +1,129 @@
-# MCP milestone and next-build strategy
+# MCP execution slice: validation and next-build strategy
 
-Checkpoint requested by the user on 2026-09-28; the user subsequently resumed work.
-Continue closing the P0 gaps below on `runtime/mcp-gateway` before expanding scope.
-This is a stacked draft on `runtime/case-core`; merge neither branch yet.
+Updated 2026-09-29 after the user resumed the preservation milestone.
+Branch `runtime/mcp-gateway` is stacked on `runtime/case-core`.
+[Draft PR #14](https://github.com/dakewamama/brain/pull/14) remains unmerged.
 
-## Preserved progression
+## Coherent commit sequence
 
-1. `01d3d31` on runtime/case-core: real PostgreSQL validation uncovered and fixed
-   snapshot races in duplicate action creation and sequence collisions in event
-   and provider-attempt appends. Fresh-process wake/resume and inbound persistence
-   now have actual database tests. 119 tests passed at this checkpoint.
-2. `367f0e6`: persisted delegated Grants and scoped Context.
-3. `c1b147f`: governed capability catalog and deterministic policy.
-4. `9606002`: central ProofGate and serialized Case advancement.
-5. `f5694d0`: immutable preparations, Gateway execution, budget reservations and
-   truthful cancellation. PostgreSQL gateway adversarial tests passed.
-6. Subsequent milestone commits: official SDK MCP server/client integration,
-   explicit upstream allowlists, compatibility registry consolidation, core
-   capability adapters, operator CLI, compiled migration packaging and docs.
+Foundation `01d3d31` validated real PostgreSQL durability and fixed duplicate-action
+snapshot races and concurrent event/attempt ordering on `runtime/case-core`.
 
-## Validation at the milestone
+1. `367f0e6`: persisted delegated Grants and scoped Context.
+2. `c1b147f`: governed Capability Registry and deterministic policy.
+3. `9606002`: persisted Proof required for Case completion.
+4. `f5694d0`: immutable preparations, Gateway, reservations and cancellation.
+5. `da26221`: shared capability storage; disabled legacy MCP bypass.
+6. `2641ef7`: official SDK server/client, allowlists and native adapters.
+7. `b06d24c`: preservation checkpoint and remaining strategy.
+8. `35481a8`: interrupted Action recovery without replaying effects.
+9. `dafb486`: Proof bound to immutable facts; serialized migrations.
+10. `d8baa96`: compiled cross-process MCP and official filesystem integration.
+11. `4e73b36`: atomic cancellation/history, graceful drain, upstream boundary
+    checks, context ownership, and fail-closed live airtime availability.
 
-- `npm run build` passes strict TypeScript compilation and packages SQL migrations.
-- `TEST_DATABASE_URL=... npm test`: **135 passing, 0 failing, 0 skipped** against
-  PostgreSQL 16, including native and upstream external MCP client integration.
-- Earlier full regression caught two legacy fixtures lacking capability metadata;
-  fixtures were corrected without weakening assertions or schema validation.
-- No live financial purchase or production-provider success is claimed.
-- `git diff --check` passes. No lint script is configured.
+## Validation
 
-## What works end to end
+- `npm run build`: passes strict TypeScript and packages SQL migrations.
+- Full `TEST_DATABASE_URL=... npm test`: **145 passing, 0 failing, 0 skipped**,
+  using an actual local PostgreSQL 16 server.
+- Native external MCP client: authenticate, authorized search, preparation,
+  execution, durable status, scoped Context, Evidence and Proof.
+- Official filesystem upstream: actual LIVE file read inside an approved directory;
+  unauthorized resources, hidden write tools and directory escape are rejected.
+- Two compiled service processes: simultaneous migrations, duplicate execute,
+  execute/cancel race, restart, stable Action and persisted Proof.
+- SIGKILL after provider acceptance: recovery requeries the original identity;
+  one purchase, one Action, final settlement. No replay of the purchase call.
+- Financial timeout retains reservations; correlated requery settles them.
+- Expired/revoked authority, missing scope, grant ceilings, stale context,
+  malformed controls, missing/stale Proof, oversized upstream output and schema
+  drift are covered. Shutdown waits for active work before closing dependencies.
+- `git diff --check` passes. No lint command is configured.
 
-An external SDK client authenticates using a persisted Grant, lists exactly six
-meta-tools, searches authorized capabilities, prepares and executes a native
-scoped-location Case, polls durable status and sees persisted evidence plus
-verification. It also invokes an allowlisted tool on the official SDK's bundled
-reference server over Streamable HTTP. That provider is explicitly SANDBOX.
-A stdio fixture verifies the second upstream transport and ambiguous write timeout.
+An initial final-suite run timed out during compiled startup while compilation
+was still running. After the SDK stream type error was fixed and the build
+finished, the full suite passed. Tests and assertions were not weakened.
+No production purchase, live Photon/Serper request or custody success is claimed.
 
-Repeated execute/invoke keeps the same durable Action and does not replay the
-purchase. Financial timeout retains its reservation; a correlated trusted-adapter
-requery can settle it. Revocation is checked again before dispatch. Cancellation
-releases queued reservations only before provider submission; after effects it
-reports inability to cancel instead of erasing history.
+## Architecture and execution boundary
 
-The MCP app is a separate entrypoint. Legacy channel services are not mounted.
-The runtime remains the existing CaseRunner/CaseWorker. No Hatchet migration or
-new planning framework was introduced.
+The eight primitives remain Case, Capability, AgentClient/Grant, Scoped Context,
+Policy, Money, Proof and MCP Gateway. MCP handlers call the transport-independent
+Gateway; they contain no provider execution path. The six tools are
+`axis.prepare`, `axis.execute`, `axis.status`, `axis.cancel`,
+`axis.capabilities.search` and `axis.capabilities.invoke`.
 
-## Next build: close correctness gaps before adding integrations
+Credentials resolve persisted client/grant/user authority internally. Preparations
+are immutable, expire and bind a digest. V1 prepares one capability Action;
+missing arguments remain missing rather than being invented. Dispatch reloads
+Grant and policy, records the stable Action/attempt, and supplies only requested,
+authorized Context. Registry invocation cannot call adapters directly.
 
-### P0 — crash recovery and production security/accounting review
+Evidence precedes verification. Verification binds the current Action, provider
+attempts, evidence and reservation facts. New attempts/facts invalidate old Proof.
+Generic completion cannot accept a playbook's success assertion alone.
+Ambiguous writes remain IN_DOUBT; insufficient evidence remains VERIFYING.
 
-1. **Closed after milestone:** a real SIGKILL-after-acceptance test now passes.
-   The existing worker recovers persisted running Cases under PostgreSQL session
-   locks and the Gateway requeries the original request. Purchase count stays one.
-   Conditional wake claims prevent stale timer snapshots from reviving cancellation.
-   No replacement workflow engine was introduced.
-2. Test independent service processes executing and cancelling the same
-   preparation. Review atomicity across approval checks, grant revocation,
-   reservation updates, attempt recording and terminal verification. Existing
-   PostgreSQL tests prove important boundaries, not the full production guarantee.
-3. Tighten the financial adapter contract before enabling live spending. Gateway
-   airtime limits currently describe the requested NGN face value; custody debits
-   USDC and may include conversion/margin. Require an authoritative debit/fee bound
-   and correct currency accounting. Do not claim NGN reservations are a replacement
-   for the custody ledger or silently expand Onboarding feature scope.
-4. Test malicious upstream structured output, schema/version drift, disconnected
-   health, result/context retention after grant narrowing, and database outages
-   between execution result, evidence and proof. Verify terminal transitions cannot
-   reuse stale verification evidence. Complete tests for case-scoped context and
-   resource/connected-account restrictions.
-5. Review the central ProofGate against actual provider evidence requirements.
-   Current checks establish a useful floor, not universal proof of arbitrary
-   external writes. The old airtime compatibility playbook remains deprecated and
-   is not the new production path.
-6. Fail safely on simultaneous migration/startup and graceful shutdown during an
-   active provider call. Add a compiled-server restart integration test, not only
-   source-level imports and reconstructed repository instances.
+Queueing and safe cancellation commit their state and history atomically.
+Cancellation releases an unsubmitted reservation; submitted or irreversible work
+returns CANNOT_CANCEL with reconciliation/compensation guidance. No unsupported
+provider cancellation or compensation is claimed.
 
-Strategy: reproduce each invariant violation with a failing PostgreSQL or external
-SDK test, fix the smallest shared primitive, run relevant regressions, commit and
-push that coherent change. Keep all eight primitives; add no new subsystem.
+Upstream discovery admits only operator-approved servers and exact tools.
+Provenance, resources, mode, schemas, scopes and health remain explicit. SDK stdio
+and Streamable HTTP are used; HTTP greeting and slow-call servers are test
+fixtures. The useful integration is one official filesystem server. Schema drift
+requires operator refresh; disconnection removes tools from search while owned
+historical status remains accessible.
 
-### P1 — finish the useful capability slice
+The existing runtime abstraction and worker are preserved. Legacy channel code is
+not mounted by the MCP entrypoint and is outside its security guarantees.
 
-- Production AgentClient enrollment/consent with a real auth issuer using SDK
-  facilities. Current operator-issued credentials are intentional V1 access,
-  not a bespoke OAuth implementation. Approval is a trusted operator path, not
-  an agent-supplied boolean.
-- Replace the SANDBOX reference upstream with **one** useful approved app server,
-  retaining the same allowlist, provenance, grant, Action and Proof path. Do not
-  integrate several aggregators.
-- Validate configured Photon and Serper adapters against legitimate live/sandbox
-  endpoints. Add provider contract tests. No credentials were needed for the
-  reference MCP proof; no live purchase was made.
-- Supply an authoritative commerce quote provider. Quote remains UNAVAILABLE by
-  default, and search-engine prices must never become merchant offers.
-- Expose money.transfer only after its existing provider supports stable identity,
-  authoritative final status and money reconciliation. Do not fake settlement.
-- Finish replacing deprecated direct execution compatibility paths once clients
-  migrate. The legacy channel app is not part of this deployment or its security
-  guarantee. Do not modify deferred WhatsApp workflows.
+## Availability
 
-## Release gates still apply
+| Family | Mode and boundary |
+| --- | --- |
+| location.context | LIVE, granted fresh Context only |
+| location.search | LIVE with configured approved Photon endpoint; otherwise UNAVAILABLE |
+| money.balance | Explicit configured LIVE/SANDBOX custody; otherwise UNAVAILABLE |
+| telecom.airtime.purchase | SANDBOX only; LIVE deliberately UNAVAILABLE |
+| money.transfer | UNAVAILABLE pending stable provider identity/settlement contract |
+| commerce.search | LIVE with Serper credentials; observations, not offers |
+| commerce.quote | Authoritative injected provider interface; default UNAVAILABLE |
+| apps.documents.read | UPSTREAM_MCP / LIVE with approved filesystem directory and resource Grant |
+| MOCK / HANDOFF | MOCK only in tests; no HANDOFF execution adapter in this slice |
 
-Build, strict source TypeScript, real PostgreSQL integration, independent-process
-crash recovery, external MCP client tests and all adversarial invariants must pass.
-Only then claim the release's full quality invariants. This milestone does not
-make that claim. Keep draft PRs unmerged.
+Production rejects MOCK and SANDBOX. No commerce.purchase exists.
+
+## P0 boundary and next work
+
+No known failing P0 test remains in the enabled slice. Live airtime is intentionally
+blocked: an NGN face-value reservation does not bound a custody USDC debit with
+conversion/margin. Keep it UNAVAILABLE until the existing provider offers an
+authoritative debit/fee bound that Axis can enforce. This work does not authorize
+new Onboarding features or a payment rewrite.
+
+P1 work, in order:
+
+1. Provision operator-issued Grants and one approved filesystem directory in the
+   target environment; run the same external-client smoke path there. Keep secrets
+   out of descriptors, URLs and committed files. For wider enrollment, integrate
+   a real issuer/consent flow using SDK facilities; no bespoke OAuth stack.
+2. Add an operator reconciliation procedure for revoked Grants with unresolved
+   effects. Revocation fails closed; it must not silently authorize new work.
+   Add provider cancellation/compensation only where a legitimate contract exists.
+3. Validate configured Photon, Serper and custody contracts with authorized
+   credentials. Supply a legitimate authoritative quote provider before enabling
+   quotes. Preserve explicit UNAVAILABLE instead of fabricating commerce outcomes.
+4. Enable live financial effects only after authoritative debit bounds, stable
+   identity, final money state and independent proof are testable end to end.
+5. Migrate remaining legacy callers only when requested; never expose their direct
+   execution routes alongside the governed MCP deployment.
+
+Strategy: reproduce each new invariant with an adversarial database/external
+client test, make the smallest shared change, validate, commit and push it before
+adding breadth. Keep draft PRs unmerged. Do not add another planning framework.
+
+WhatsApp, Merchant Bridge, voice, Iya Seun, social commerce, private Bolt/Chowdeck
+APIs, Jev, A2A, process mining, Hatchet migration and frontend redesign stay deferred.

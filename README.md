@@ -1,12 +1,13 @@
-# Axis MCP execution milestone
+# Axis MCP execution runtime
 
 Axis is a policy-bounded execution runtime. External clients propose work; Axis
 resolves delegated authority, records durable Actions, enforces policy, and
 requires persisted evidence before declaring completion.
 
-**This branch is a development milestone, not a completed production release.**
-The stacked draft targets `runtime/case-core`. See [the milestone and next-build
-strategy](docs/MCP-MILESTONE.md) for remaining P0 work and release gates.
+This stacked draft targets `runtime/case-core`. See [validation and next-build
+strategy](docs/MCP-MILESTONE.md) for tested boundaries and provider limitations.
+This is an operator-provisioned execution slice, not a claim that every provider
+is production-ready.
 
 ## Implemented
 
@@ -21,7 +22,8 @@ strategy](docs/MCP-MILESTONE.md) for remaining P0 work and release gates.
 - Six MCP meta-tools using the official TypeScript SDK and Streamable HTTP.
 - Explicitly allowlisted upstream MCP tools over stdio and Streamable HTTP.
 - External SDK client integration tests covering native context access and the
-  SDK's actual bundled upstream reference server. The reference is SANDBOX.
+  official filesystem MCP server, including compiled service restart and two-process
+  execution. HTTP reference fixtures remain explicitly SANDBOX.
 
 ## Run
 
@@ -95,7 +97,7 @@ There is no configured lint command.
 | `location.context` | LIVE, native; only current, granted context |
 | `location.search` | LIVE with configured Photon provider; otherwise UNAVAILABLE |
 | `money.balance` | Explicit LIVE/SANDBOX onboarding mode and credentials; otherwise UNAVAILABLE |
-| `telecom.airtime.purchase` | Existing onboarding adapter, explicit mode/credentials plus wallet and recipient grants; financial production review still required |
+| `telecom.airtime.purchase` | SANDBOX only with credentials and wallet/recipient grants; LIVE is UNAVAILABLE until custody enforces an authoritative debit/fee bound |
 | `money.transfer` | UNAVAILABLE: existing off-ramp lacks required identity/settlement contract |
 | `commerce.search` | LIVE with Serper credentials; observations only |
 | `commerce.quote` | Replaceable authoritative provider interface; default UNAVAILABLE |
