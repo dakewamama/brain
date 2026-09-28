@@ -7,9 +7,9 @@
  *    action instead of inserting (UNIQUE constraint; the race loser reads).
  *  - claimInbound(): a (channel, provider_message_id) replay returns false — the
  *    first arrival owns processing.
- * Both are single SQL statements, so concurrent workers cannot double-apply.
+ * Unique inserts decide ownership; a fresh snapshot reads a concurrent winner.
  */
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import {
   type CaseRecord,
   type CaseStatus,
@@ -200,28 +200,31 @@ export class PgCaseStore implements CaseStore {
   }
 
   async appendEvent(caseId: string, type: string, payload: Record<string, unknown> = {}): Promise<CaseEvent> {
-    // MAX(seq)+1 races between concurrent appenders; on a (case_id, seq)
-    // collision, retry — the winner committed, so the next attempt appends
-    // after it. Gapless sequence, no gaps, no lost events.
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        const r = await this.pool.query(
-          `INSERT INTO case_events (case_id, seq, type, payload)
-           SELECT $1, COALESCE(MAX(seq),0)+1, $2, $3 FROM case_events WHERE case_id = $1
-           RETURNING seq, at`,
-          [caseId, type, JSON.stringify(payload)],
-        );
-        return {
-          caseId, type, payload,
-          seq: Number(r.rows[0].seq),
-          at: new Date(r.rows[0].at),
-        };
-      } catch (err) {
-        if ((err as { code?: string }).code === "23505" && attempt < 4) continue;
-        throw err;
-      }
-    }
-    throw new Error(`appendEvent: could not append after retries (case ${caseId})`);
+    return this.locked("cases", caseId, async client => {
+      const r = await client.query(
+        `INSERT INTO case_events (case_id, seq, type, payload)
+         SELECT $1, COALESCE(MAX(seq),0)+1, $2, $3 FROM case_events WHERE case_id = $1
+         RETURNING seq, at`, [caseId, type, JSON.stringify(payload)],
+      );
+      return { caseId, type, payload, seq: Number(r.rows[0].seq), at: new Date(r.rows[0].at) };
+    });
+  }
+
+  /** Serialize sequence allocation on its parent row. The insert uses a fresh
+   * READ COMMITTED snapshot after acquiring the lock; no bounded retry race. */
+  private async locked<T>(table: "cases" | "actions", id: string, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const parent = await client.query(`SELECT id FROM ${table} WHERE id=$1 FOR UPDATE`, [id]);
+      if (!parent.rowCount) throw new Error(`unknown ${table} parent`);
+      const result = await fn(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
   }
 
   async listEvents(caseId: string): Promise<CaseEvent[]> {
@@ -236,23 +239,18 @@ export class PgCaseStore implements CaseStore {
   async createAction(input: {
     id: string; caseId: string; capability: string; idempotencyKey: string; input: Record<string, unknown>;
   }): Promise<{ action: ActionRecord; created: boolean }> {
-    // One statement decides insert-vs-conflict: the CTE returns the row it
-    // inserted, or — on a unique-key conflict — reads the existing row. Every
-    // concurrent caller lands on the SAME action with a truthful `created`.
     const r = await this.pool.query(
-      `WITH ins AS (
-         INSERT INTO actions (id, case_id, capability, status, input, idempotency_key)
-         VALUES ($1,$2,$3,'proposed',$4,$5)
-         ON CONFLICT (idempotency_key) DO NOTHING
-         RETURNING *, true AS created
-       )
-       SELECT * FROM ins
-       UNION ALL
-       SELECT *, false AS created FROM actions
-       WHERE idempotency_key = $5 AND NOT EXISTS (SELECT 1 FROM ins)`,
+      `INSERT INTO actions (id, case_id, capability, status, input, idempotency_key)
+       VALUES ($1,$2,$3,'proposed',$4,$5)
+       ON CONFLICT (idempotency_key) DO NOTHING RETURNING *`,
       [input.id, input.caseId, input.capability, JSON.stringify(input.input), input.idempotencyKey],
     );
-    return { action: rowToAction(r.rows[0]), created: Boolean(r.rows[0].created) };
+    if (r.rows[0]) return { action: rowToAction(r.rows[0]), created: true };
+    // A conflicting transaction may commit AFTER the insert's snapshot. Read
+    // in a new statement, which sees that commit; a same-statement CTE cannot.
+    const action = await this.getActionByIdempotencyKey(input.idempotencyKey);
+    if (!action) throw new Error("conflicting action disappeared");
+    return { action, created: false };
   }
 
   async getAction(id: string): Promise<ActionRecord | null> {
@@ -278,7 +276,8 @@ export class PgCaseStore implements CaseStore {
     request: Record<string, unknown>; outcome: AttemptOutcome;
     response?: Record<string, unknown> | null; providerRef?: string | null; error?: string | null;
   }): Promise<ProviderAttempt> {
-    const r = await this.pool.query(
+    return this.locked("actions", input.actionId, async client => {
+    const r = await client.query(
       `INSERT INTO provider_attempts (id, action_id, seq, provider, mode, request, outcome, response, provider_ref, error)
        SELECT $1,$2,COALESCE(MAX(seq),0)+1,$3,$4,$5,$6,$7,$8,$9 FROM provider_attempts WHERE action_id = $2
        RETURNING seq, at`,
@@ -288,6 +287,7 @@ export class PgCaseStore implements CaseStore {
     );
     return { ...input, response: input.response ?? null, providerRef: input.providerRef ?? null,
              error: input.error ?? null, seq: Number(r.rows[0].seq), at: new Date(r.rows[0].at) };
+    });
   }
 
   async putReservation(input: {
