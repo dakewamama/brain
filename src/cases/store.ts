@@ -39,6 +39,9 @@ export interface CreateCaseInput {
 }
 
 export interface CaseStore {
+  exclusive<T>(caseId: string, fn: () => Promise<T>): Promise<T>;
+  listActions(caseId: string): Promise<ActionRecord[]>;
+  attemptsFor(actionId: string): Promise<ProviderAttempt[]>;
   createCase(input: CreateCaseInput): Promise<CaseRecord>;
   getCase(id: string): Promise<CaseRecord | null>;
   updateCase(
@@ -158,6 +161,18 @@ function rowToAction(r: Record<string, unknown>): ActionRecord {
 
 export class PgCaseStore implements CaseStore {
   constructor(private pool: Pool) {}
+  async exclusive<T>(caseId: string, fn: () => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try { await client.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [caseId]); return await fn(); }
+    finally { await client.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [caseId]); client.release(); }
+  }
+  async listActions(caseId: string): Promise<ActionRecord[]> {
+    return (await this.pool.query("SELECT * FROM actions WHERE case_id=$1 ORDER BY created_at", [caseId])).rows.map(rowToAction);
+  }
+  async attemptsFor(actionId: string): Promise<ProviderAttempt[]> {
+    return (await this.pool.query("SELECT * FROM provider_attempts WHERE action_id=$1 ORDER BY seq", [actionId])).rows.map(r => ({ id:r.id,actionId:r.action_id,seq:r.seq,provider:r.provider,mode:r.mode,request:r.request,outcome:r.outcome,response:r.response,providerRef:r.provider_ref,error:r.error,at:new Date(r.at) }));
+  }
+
 
   async createCase(input: CreateCaseInput): Promise<CaseRecord> {
     const r = await this.pool.query(
@@ -182,6 +197,10 @@ export class PgCaseStore implements CaseStore {
     id: string,
     patch: Partial<Pick<CaseRecord, "state" | "status" | "context" | "wakeAt" | "deadlineAt">>,
   ): Promise<CaseRecord | null> {
+    if (patch.status === "completed") {
+      const proof = await this.pool.query("SELECT 1 FROM evidence WHERE case_id=$1 AND kind='verification' AND payload->>'verified'='true'", [id]);
+      if (!proof.rowCount) throw new Error("completion requires Axis proof");
+    }
     const sets: string[] = [];
     const vals: unknown[] = [];
     let n = 1;
@@ -446,6 +465,15 @@ export class PgCaseStore implements CaseStore {
 interface MemAction extends ActionRecord { attempts: ProviderAttempt[] }
 
 export class InMemoryCaseStore implements CaseStore {
+  private locks = new Map<string, Promise<unknown>>();
+  async exclusive<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    const prior=this.locks.get(id) ?? Promise.resolve();
+    const next=prior.catch(()=>{}).then(fn); this.locks.set(id,next);
+    try { return await next; } finally { if(this.locks.get(id)===next) this.locks.delete(id); }
+  }
+  async listActions(caseId: string): Promise<ActionRecord[]> { return [...this.actions.values()].filter(a=>a.caseId===caseId); }
+  async attemptsFor(actionId: string): Promise<ProviderAttempt[]> { return this.actions.get(actionId)?.attempts ?? []; }
+
   readonly cases = new Map<string, CaseRecord>();
   readonly events = new Map<string, CaseEvent[]>();
   readonly actions = new Map<string, MemAction>();
@@ -479,6 +507,7 @@ export class InMemoryCaseStore implements CaseStore {
     id: string,
     patch: Partial<Pick<CaseRecord, "state" | "status" | "context" | "wakeAt" | "deadlineAt">>,
   ): Promise<CaseRecord | null> {
+    if(patch.status === "completed" && !(this.evidence.get(id) ?? []).some(e=>e.kind === "verification" && e.payload.verified === true)) throw new Error("completion requires Axis proof");
     const c = this.cases.get(id);
     if (!c) return null;
     Object.assign(c, patch, { updatedAt: new Date() });

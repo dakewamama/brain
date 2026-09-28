@@ -18,6 +18,7 @@
  * reconcileInDoubt) is the seam a different executor (e.g. Hatchet) would
  * implement; playbooks never see it.
  */
+import { verifyCompletion } from "../proof/gate.js";
 import { randomUUID } from "node:crypto";
 import type {
   CaseRecord,
@@ -137,6 +138,18 @@ export class CaseRunner {
 
   /** Run states from the case's recorded resume point until it rests. */
   async advance(caseId: string): Promise<CaseStepOutcome> {
+    return this.store.exclusive(caseId, () => this.advanceUnlocked(caseId));
+  }
+  async complete(caseId: string, summary: string): Promise<boolean> {
+    const c=await this.store.getCase(caseId);
+    if(!c) return false;
+    const verified=await verifyCompletion(this.store,caseId,this.playbooks.get(c.playbook)?.verification);
+    if(!verified) { await this.store.updateCase(caseId,{status:"verifying"}); return false; }
+    await this.store.appendEvent(caseId,"case_completed",{summary});
+    await this.store.updateCase(caseId,{status:"completed",wakeAt:null});
+    return true;
+  }
+  private async advanceUnlocked(caseId: string): Promise<CaseStepOutcome> {
     for (let hop = 0; hop < MAX_HOPS; hop++) {
       const current = await this.store.getCase(caseId);
       if (!current) throw new Error(`unknown case ${caseId}`);
@@ -220,8 +233,8 @@ export class CaseRunner {
         }
         case "complete": {
           const t = transition as Extract<Transition, { complete: unknown }>;
-          await this.store.appendEvent(caseId, "case_completed", { summary: t.complete.summary });
-          await this.store.updateCase(caseId, { status: "completed", context: t.context ?? {}, wakeAt: null });
+          await this.store.updateCase(caseId, { context: t.context ?? {} });
+          await this.complete(caseId, t.complete.summary);
           const done = (await this.store.getCase(caseId))!;
           return this.outcome(done, true, ctx.pendingReplies);
         }
@@ -340,6 +353,8 @@ export class CaseRunner {
 
 export function isResting(status: CaseRecord["status"]): boolean {
   return (
+    status === "prepared" ||
+    status === "verifying" ||
     status === "waiting_user" ||
     status === "waiting_timeout" ||
     status === "in_doubt" ||
