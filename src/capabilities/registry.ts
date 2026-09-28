@@ -37,11 +37,12 @@ export interface CapabilityAdapter {
 }
 export interface Invocation { capabilityId: string; arguments: Record<string, unknown>; idempotencyKey: string }
 export interface Discovery { query?: string; region?: string; modes?: CapabilityDescriptor["mode"][]; risks?: CapabilityDescriptor["risk"][]; limit?: number }
-export function permitted(p: Principal, d: CapabilityDescriptor): boolean {
+export function authorized(p: Principal, d: CapabilityDescriptor): boolean {
   return !(process.env.NODE_ENV === "production" && (d.mode === "MOCK" || d.mode === "SANDBOX" || d.metadata?.executionMode === "SANDBOX")) &&
     (!Array.isArray(d.metadata?.requiredResources) || d.metadata.requiredResources.every(r=>typeof r==="string"&&p.authority.resources.includes(r))) && p.authority.capabilities.includes(d.id) && d.requiredScopes.every(s => p.authority.scopes.includes(s)) &&
-    d.mode !== "UNAVAILABLE" && p.authority.modes.includes(d.mode) && d.health === "healthy";
+    d.mode !== "UNAVAILABLE" && p.authority.modes.includes(d.mode);
 }
+export function permitted(p: Principal, d: CapabilityDescriptor): boolean { return authorized(p,d) && d.health === "healthy"; }
 export function rejectAuthorityControls(value: unknown): void {
   if (Array.isArray(value)) { value.forEach(rejectAuthorityControls); return; }
   if (value && typeof value === "object") for (const [key,v] of Object.entries(value)) {

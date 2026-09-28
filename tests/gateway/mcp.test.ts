@@ -65,6 +65,15 @@ else {
    const slow=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.slow",arguments:{},idempotencyKey:"slow"});await worker.tick();assert.equal((await call(c,"axis.status",{workId:slow.workId})).status,"IN_DOUBT");assert.equal((await call(c,"axis.cancel",{workId:slow.workId})).result,"CANNOT_CANCEL");
   }finally{await c.close();}
  });
+ test("oversized output is rejected and changed upstream schema becomes unavailable",async()=>{
+  const c=await client();try {
+   const large=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"__oversize__"},idempotencyKey:"large"});await worker.tick();assert.equal((await call(c,"axis.status",{workId:large.workId})).status,"FAILED");
+   const change=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"__change_schema__"},idempotencyKey:"change"});await worker.tick();assert.equal((await call(c,"axis.status",{workId:change.workId})).status,"COMPLETED");
+   const stale=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"old schema"},idempotencyKey:"drift"});await worker.tick();assert.equal((await call(c,"axis.status",{workId:stale.workId})).status,"FAILED");
+   assert.equal(registry.get("apps.fixture.read")?.health,"unhealthy");
+   assert.ok(!JSON.stringify(await call(c,"axis.capabilities.search",{})).includes("apps.fixture.read"));
+  }finally{await c.close();}
+ });
  test("unauthorized clients, malformed requests, foreign origins and authorization controls fail safely",async()=>{
   assert.equal((await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:"{}"})).status,401);
   assert.equal((await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer wrong"},body:"{}"})).status,401);

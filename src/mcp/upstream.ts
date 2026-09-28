@@ -1,3 +1,4 @@
+import { digest } from "../core/digest.js";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -27,8 +28,10 @@ export async function connectUpstream(registry:CapabilityRegistry,raw:unknown):P
   new StdioClientTransport({command:config.command,args:config.args,env:childEnv({name:config.id,command:config.command,passEnv:config.passEnv},process.env),stderr:"pipe"}):
   new StreamableHTTPClientTransport(new URL(config.url),{requestInit:config.tokenEnv?{headers:{authorization:`Bearer ${requiredEnv(config.tokenEnv)}`}}:undefined});
  const registered:string[]=[];
+ client.onclose=()=>{for(const id of registered)registry.setHealth(id,"unhealthy");};
  try {
   await client.connect(transport,{timeout:Math.max(10000,config.timeoutMs)});
+  if(transport instanceof StdioClientTransport) transport.stderr?.on("data",()=>{});
   let cursor:string|undefined;
   const seen=new Set<string>();
   do {
@@ -39,7 +42,23 @@ export async function connectUpstream(registry:CapabilityRegistry,raw:unknown):P
     registry.register({id,version:"1",provider:{id:config.id,kind:"upstream_mcp"},description:discovered.description??discovered.name,inputSchema:discovered.inputSchema,outputSchema:allowed.outputSchema,mode:"UPSTREAM_MCP",risk:allowed.risk,requiredScopes:allowed.requiredScopes,reversible:allowed.risk==="read",contextTypes:[],health:"healthy",metadata:{serverId:config.id,origin:config.transport==="http"?config.url:`stdio:${config.command}`,toolName:discovered.name,executionMode:config.executionMode,requiredResources:allowed.resources}}, {
      resources:()=>allowed.resources,
      async execute(args) {
+      // An upstream can change tools without restarting Axis. Revalidate the
+      // advertised contract before allowing any effect under a prepared schema.
+      let currentCursor:string|undefined;let currentSchema:unknown;
+      const cursors=new Set<string>();
+      do {
+        const current=await client.listTools(currentCursor?{cursor:currentCursor}:{},{timeout:Math.max(10000,config.timeoutMs)});
+        const found=current.tools.find(t=>t.name===discovered.name);
+        if(found) {currentSchema={input:found.inputSchema,output:found.outputSchema};break;}
+        currentCursor=current.nextCursor;
+        if(currentCursor&&cursors.has(currentCursor))throw new Error("upstream repeated discovery cursor");
+        if(currentCursor)cursors.add(currentCursor);
+      }while(currentCursor);
+      if(!currentSchema || digest(currentSchema)!==digest({input:discovered.inputSchema,output:discovered.outputSchema})) {
+        registry.setHealth(id,"unhealthy");throw new Error("upstream schema changed; operator refresh required");
+      }
       const result=await client.callTool({name:discovered.name,arguments:args},undefined,{timeout:config.timeoutMs});
+      if(JSON.stringify(result).length>65536)throw new Error("upstream result too large");
       let data:Record<string,unknown>;
       if(result.structuredContent && typeof result.structuredContent==="object") data=result.structuredContent as Record<string,unknown>;
       else {

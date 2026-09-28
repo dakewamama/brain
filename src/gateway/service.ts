@@ -4,7 +4,7 @@ import type { Pool } from "pg";
 import { CaseRunner } from "../cases/runtime.js";
 import { PgCaseStore } from "../cases/store.js";
 import type { Transition } from "../cases/types.js";
-import { CapabilityRegistry, permitted, rejectAuthorityControls, type Dispatch, type CapabilityDescriptor, type Invocation, type MoneyRequirement, type ProviderResult } from "../capabilities/registry.js";
+import { CapabilityRegistry, permitted, authorized, rejectAuthorityControls, type Dispatch, type CapabilityDescriptor, type Invocation, type MoneyRequirement, type ProviderResult } from "../capabilities/registry.js";
 import { GrantService, AxisError, type Principal } from "../grants/service.js";
 import { ContextService } from "../context/service.js";
 import { hasCurrentProof } from "../proof/gate.js";
@@ -90,13 +90,13 @@ export class AxisGateway {
       await db.query("BEGIN");
       await db.query("INSERT INTO cases(id,user_id,channel,goal,playbook,state,status,context) VALUES ($1,$2,'mcp',$3,'gateway-v1','execute','prepared',$4)",[workId,p.userId,input.goal,{preparationId:id}]);
       await db.query("INSERT INTO preparations(id,case_id,grant_id,client_id,user_id,invocation_key,request_digest,digest,proposal,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",[id,workId,p.grantId,p.clientId,p.userId,key??null,requestDigest,version,proposal,expires]);
+      await db.query("INSERT INTO case_events(case_id,seq,type,payload) VALUES ($1,1,'prepared',$2)",[workId,{digest:version}]);
       await db.query("COMMIT");
     } catch(error) {
       await db.query("ROLLBACK");
       if(key && (error as {code?:string}).code==="23505") return this.prepareFor(p,input,key);
       throw error;
     } finally {db.release();}
-    await this.store.appendEvent(workId,"prepared",{digest:version});
     return this.preparedView({id,case_id:workId,grant_id:p.grantId,client_id:p.clientId,user_id:p.userId,digest:version,request_digest:requestDigest,proposal,expires_at:expires});
   }
   private preparedView(p:Preparation):Record<string,unknown> { return {preparationId:p.id,workId:p.case_id,...p.proposal,version:1,digest:p.digest,expiresAt:new Date(p.expires_at).toISOString()}; }
@@ -158,9 +158,9 @@ export class AxisGateway {
           await db.query("INSERT INTO reservations(id,action_id,owner,amount_minor,asset,status) VALUES ($1,$1,$2,$3,$4,'reserved')",[id,p.userId,money.amountMinor,money.asset]);
         }
         await db.query("UPDATE cases SET status='waiting_timeout',wake_at=now() WHERE id=$1",[prep.case_id]);
+        await db.query("INSERT INTO case_events(case_id,seq,type,payload) SELECT $1,COALESCE(MAX(seq),0)+1,'queued',$2 FROM case_events WHERE case_id=$1",[prep.case_id,{preparationId:prep.id}]);
         await db.query("COMMIT");
       } catch(error) {await db.query("ROLLBACK");throw error;} finally{db.release();}
-      await this.store.appendEvent(prep.case_id,"queued",{preparationId:prep.id});
     });
   }
   async invokeCapability(token:string,raw:unknown):Promise<unknown> {
@@ -179,7 +179,7 @@ export class AxisGateway {
   private async statusFor(p:Principal,prep:Preparation):Promise<Record<string,unknown>> {
     const c=await this.store.getCase(prep.case_id);if(!c) throw new AxisError("not_found");
     const descriptor=this.registry.get(prep.proposal.actions[0]?.capabilityId);
-    if(descriptor && !permitted(p,descriptor)) throw new AxisError("not_found");
+    if(descriptor && !authorized(p,descriptor)) throw new AxisError("not_found");
     const actions=await this.store.listActions(c.id);const action=actions[0];
     const evidence=await this.store.listEvidence(c.id);
     const money=action?(await this.pool.query("SELECT asset,amount_minor::text,state FROM action_money WHERE action_id=$1",[action.id])).rows[0]:null;
@@ -199,8 +199,17 @@ export class AxisGateway {
       const c=await this.store.getCase(prep.case_id);const actions=await this.store.listActions(prep.case_id);
       if(c?.status==="cancelled") return {workId:prep.case_id,result:"CANCELLED"};
       if(c?.status==="completed" || actions.some(a=>!["proposed","authorized","rejected"].includes(a.status))) return {workId:prep.case_id,result:"CANNOT_CANCEL",nextRequiredAction:"Provider reconciliation or compensation is required; no external effect was undone"};
-      for(const action of actions) {await this.money(action.id,"RELEASED");await this.store.updateActionStatus(action.id,"released");}
-      await this.store.updateCase(prep.case_id,{status:"cancelled",wakeAt:null});await this.store.appendEvent(prep.case_id,"case_cancelled",{reason:"authorized cancellation before dispatch"});
+      const db=await this.pool.connect();
+      try {
+        await db.query("BEGIN");
+        await db.query("SELECT id FROM cases WHERE id=$1 FOR UPDATE",[prep.case_id]);
+        await db.query("UPDATE action_money SET state='RELEASED' WHERE action_id IN (SELECT id FROM actions WHERE case_id=$1)",[prep.case_id]);
+        await db.query("UPDATE reservations SET status='released',updated_at=now() WHERE action_id IN (SELECT id FROM actions WHERE case_id=$1)",[prep.case_id]);
+        await db.query("UPDATE actions SET status='released',updated_at=now() WHERE case_id=$1",[prep.case_id]);
+        await db.query("UPDATE cases SET status='cancelled',wake_at=NULL,updated_at=now() WHERE id=$1",[prep.case_id]);
+        await db.query("INSERT INTO case_events(case_id,seq,type,payload) SELECT $1,COALESCE(MAX(seq),0)+1,'case_cancelled',$2 FROM case_events WHERE case_id=$1",[prep.case_id,{reason:"authorized cancellation before dispatch"}]);
+        await db.query("COMMIT");
+      }catch(error){await db.query("ROLLBACK");throw error;}finally{db.release();}
       return {workId:prep.case_id,result:"CANCELLED"};
     });
   }

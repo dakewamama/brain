@@ -39,3 +39,12 @@ test("a later attempt invalidates earlier proof and cannot silently complete aga
  await assert.rejects(store.updateCase("c",{status:"completed"}),/current Axis proof/);
  assert.equal(await verifyCompletion(store,"c"),false);
 });
+test("graceful shutdown drains an active sweep instead of closing providers early",async()=>{
+ const {CaseWorker}=await import("../../src/cases/worker.js");
+ const store=new InMemoryCaseStore(),runner=new CaseRunner(store),worker=new CaseWorker(runner,store);
+ let release!:()=>void,entered!:()=>void;const entry=new Promise<void>(r=>{entered=r;});const finish=new Promise<void>(r=>{release=r;});let calls=0;
+ runner.registerPlaybook({id:"drain",initialState:"run",states:{run:{async onEnter(){calls++;entered();await finish;return {fail:{reason:"finished safely"}};}}}});
+ await store.createCase({id:"drain",userId:"u",channel:"test",goal:"g",playbook:"drain",state:"run"});
+ const active=worker.tick();await entry;const duplicate=worker.tick();let drained=false;const stopped=worker.stopAndDrain().then(()=>{drained=true;});
+ await Promise.resolve();assert.equal(drained,false);release();await Promise.all([active,duplicate,stopped]);assert.equal(drained,true);assert.equal(calls,1);
+});

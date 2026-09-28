@@ -22,6 +22,7 @@ export class ContextService {
   constructor(private pool: Pool) {}
   /** Trusted ingestion, with provenance. An agent cannot write its own facts. */
   async put(userId: string, item: Omit<ContextItem, "id" | "requiredScope">): Promise<string> {
+    if(item.caseId && !(await this.pool.query("SELECT 1 FROM cases WHERE id=$1 AND user_id=$2",[item.caseId,userId])).rowCount) throw new AxisError("context_scope");
     const value = validators[item.type].parse(item.value);
     if (!item.source || !Number.isFinite(Date.parse(item.observedAt)) || !Number.isFinite(Date.parse(item.expiresAt)) || Date.parse(item.observedAt) > Date.now()) throw new AxisError("invalid_context");
     const id = randomUUID();
@@ -30,6 +31,7 @@ export class ContextService {
     return id;
   }
   async read(principal: Principal, types: readonly string[], caseId?: string): Promise<ContextItem[]> {
+    if(caseId && !(await this.pool.query("SELECT 1 FROM cases WHERE id=$1 AND user_id=$2",[caseId,principal.userId])).rowCount) return [];
     const allowed = types.filter(t => principal.authority.contextTypes.includes(t) && principal.authority.scopes.includes(`context:${t}`));
     if (!allowed.length) return [];
     const result = await this.pool.query(`SELECT DISTINCT ON(type) * FROM scoped_context

@@ -43,4 +43,15 @@ else {
     await pool.query("UPDATE scoped_context SET expires_at=now()-interval '1 second' WHERE user_id=$1",[p.userId]);
     assert.deepEqual(await context.read(p,["location.coarse"]),[]);
   });
+  test("case-scoped context belongs to one user and one Case",async()=>{
+    const p=await grants.authenticate((await issue()).token);
+    const own=randomUUID(),other=randomUUID();
+    for(const id of [own,other])await pool.query("INSERT INTO cases(id,user_id,channel,goal,playbook,state,status) VALUES ($1,$2,'test','g','p','s','prepared')",[id,p.userId]);
+    await context.put(p.userId,{type:"location.coarse",value:{region:"Abuja",country:"NG"},source:"user",observedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60000).toISOString(),sensitivity:"standard",caseId:own});
+    assert.equal((await context.read(p,["location.coarse"],own)).length,1);
+    assert.deepEqual(await context.read(p,["location.coarse"],other),[]);
+    assert.deepEqual(await context.read(p,["location.coarse"]),[]);
+    await assert.rejects(context.put("another-user",{type:"location.coarse",value:{region:"Lagos",country:"NG"},source:"user",observedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60000).toISOString(),sensitivity:"standard",caseId:own}),/context_scope/);
+  });
+
 }
