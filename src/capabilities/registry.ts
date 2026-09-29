@@ -29,6 +29,7 @@ export interface ProviderContext {
   actionId: string; idempotencyKey: string; userId: string; grantId?: string; clientId?: string; context: readonly ContextItem[];
 }
 export interface CapabilityAdapter {
+  health?():Promise<"healthy"|"unhealthy">;
   /** Read-only authoritative preparation. Must never create provider orders. */
   prepare?(args: Record<string,unknown>, principal: Principal): Promise<Record<string,unknown>>;
   execute(args: Record<string, unknown>, context: ProviderContext): Promise<ProviderResult>;
@@ -40,7 +41,7 @@ export interface CapabilityAdapter {
 export interface Invocation { capabilityId: string; arguments: Record<string, unknown>; idempotencyKey: string }
 export interface Discovery { query?: string; region?: string; modes?: CapabilityDescriptor["mode"][]; risks?: CapabilityDescriptor["risk"][]; limit?: number }
 export function authorized(p: Principal, d: CapabilityDescriptor): boolean {
-  return !(process.env.NODE_ENV === "production" && (d.mode === "MOCK" || d.mode === "SANDBOX" || d.metadata?.executionMode === "SANDBOX")) &&
+  return (!d.metadata?.authorizedUserId || d.metadata.authorizedUserId===p.userId) && !(process.env.NODE_ENV === "production" && (d.mode === "MOCK" || d.mode === "SANDBOX" || d.metadata?.executionMode === "SANDBOX")) &&
     (!Array.isArray(d.metadata?.requiredResources) || d.metadata.requiredResources.every(r=>typeof r==="string"&&p.authority.resources.includes(r))) && p.authority.capabilities.includes(d.id) && d.requiredScopes.every(s => p.authority.scopes.includes(s)) &&
     d.mode !== "UNAVAILABLE" && p.authority.modes.includes(d.mode);
 }
@@ -77,6 +78,9 @@ export class CapabilityRegistry {
   compatibilityList<T>(): T[] { return [...this.entries.values()].flatMap(e=>e.compatibility?[e.compatibility as T]:[]); }
   get(id: string): CapabilityDescriptor | undefined { const d=this.entries.get(id)?.descriptor; return d && structuredClone(d); }
   setHealth(id: string, health: CapabilityDescriptor["health"]): void { const e=this.entries.get(id); if(e) e.descriptor.health=health; }
+  async refresh(p:Principal):Promise<void>{
+    await Promise.all([...this.entries.values()].filter(e=>authorized(p,e.descriptor)&&e.adapter.health).map(async e=>{try{e.descriptor.health=await e.adapter.health!();}catch{e.descriptor.health="unhealthy";}}));
+  }
   listAuthorized(p: Principal): CapabilityDescriptor[] { return [...this.entries.values()].map(e=>e.descriptor).filter(d=>permitted(p,d)).map(d=>structuredClone(d)); }
   search(p: Principal, filters: Discovery = {}, availableContext: readonly string[] = []): CapabilityDescriptor[] {
     const words=(filters.query ?? "").toLowerCase().split(/\W+/).filter(Boolean);

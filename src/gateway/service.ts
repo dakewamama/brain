@@ -47,7 +47,7 @@ export class AxisGateway {
     if(!r.rows[0]) throw new AxisError("not_found");return r.rows[0] as Preparation;
   }
   async searchCapabilities(token:string,raw:unknown):Promise<CapabilityDescriptor[]> {
-    const p=await this.grants.authenticate(token);const filters=searchSchema.parse(raw);
+    const p=await this.grants.authenticate(token);const filters=searchSchema.parse(raw);await this.registry.refresh(p);
     const context=await this.context.read(p,p.authority.contextTypes);
     return this.registry.search(p,filters,context.map(c=>c.type));
   }
@@ -65,6 +65,7 @@ export class AxisGateway {
         return this.preparedView(prior);
       }
     }
+    await this.registry.refresh(p);
     const context=await this.context.read(p,p.authority.contextTypes);
     const explicit=input.constraints?.capabilityId;
     const descriptor=explicit ? this.registry.get(explicit) : this.registry.search(p,{query:input.goal,region:input.constraints?.region,limit:1},context.map(c=>c.type))[0];

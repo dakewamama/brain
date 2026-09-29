@@ -1,3 +1,4 @@
+import { registerConfiguredCatalog } from "../catalog/source.js";
 import express from "express";
 import { PajProvider } from "../providers/paj/provider.js";
 import { configFromEnv } from "../providers/paj/client.js";
@@ -17,6 +18,7 @@ async function main():Promise<void> {
  await migrate();
  const registry=new CapabilityRegistry();registerCoreCapabilities(registry);
  const paj=new PajProvider(pool,configFromEnv(process.env));await paj.register(registry);
+ await registerConfiguredCatalog(registry);
  const gateway=new AxisGateway(pool,registry);
  const configs=z.array(z.unknown()).max(1).parse(JSON.parse(process.env.AXIS_UPSTREAM_MCP??"[]"));
  const upstreams:Awaited<ReturnType<typeof connectUpstream>>[]=[];
