@@ -10,6 +10,7 @@ export type CaseStatus =
   | "prepared"
   | "verifying"
   | "running" // a state handler is logically executing / ready to advance
+  | "waiting_human"
   | "waiting_user" // a Decision is open; resumes on signal()
   | "waiting_timeout" // parked until wake_at; the worker resumes it
   | "in_doubt" // a provider outcome is unknown; reconciler owns it
@@ -134,6 +135,7 @@ export interface Decision {
 
 /** What a state handler tells the runtime to do next. Exactly one branch. */
 export type Transition =
+  | { waitingHuman: { taskId: string; deadline: Date } }
   | { to: string; context?: Record<string, unknown> } // advance, keep running
   | { askUser: { question: string; options?: string[] }; context?: Record<string, unknown> }
   | { sleepUntil: Date; to?: string; context?: Record<string, unknown> }

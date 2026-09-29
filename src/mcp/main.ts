@@ -1,3 +1,5 @@
+import {HumanTaskService} from "../human/service.js";
+import {PlaywrightBrowserProvider,registerBrowser} from "../browser/provider.js";
 import { registerConfiguredCatalog } from "../catalog/source.js";
 import express from "express";
 import { PajProvider } from "../providers/paj/provider.js";
@@ -19,6 +21,8 @@ async function main():Promise<void> {
  const registry=new CapabilityRegistry();registerCoreCapabilities(registry);
  const paj=new PajProvider(pool,configFromEnv(process.env));await paj.register(registry);
  await registerConfiguredCatalog(registry);
+ new HumanTaskService(pool).register(registry);
+ if(process.env.AXIS_BROWSER_PROFILE_DIR)registerBrowser(registry,new PlaywrightBrowserProvider(pool,process.env.AXIS_BROWSER_PROFILE_DIR),z.enum(["LIVE","SANDBOX"]).parse(process.env.AXIS_BROWSER_MODE));
  const gateway=new AxisGateway(pool,registry);
  const configs=z.array(z.unknown()).max(1).parse(JSON.parse(process.env.AXIS_UPSTREAM_MCP??"[]"));
  const upstreams:Awaited<ReturnType<typeof connectUpstream>>[]=[];

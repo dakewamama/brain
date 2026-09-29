@@ -186,7 +186,7 @@ export class AxisGateway {
     const actions=await this.store.listActions(c.id);const action=actions[0];
     const evidence=await this.store.listEvidence(c.id);
     const money=action?(await this.pool.query("SELECT asset,amount_minor::text,state FROM action_money WHERE action_id=$1",[action.id])).rows[0]:null;
-    const mapping:Record<string,string>={prepared:"PREPARED",waiting_user:"WAITING_APPROVAL",waiting_timeout:action?.status==="authorized"?"QUEUED":"WAITING_EXTERNAL",running:"EXECUTING",in_doubt:"IN_DOUBT",verifying:"VERIFYING",completed:"COMPLETED",failed:"FAILED",cancelled:"CANCELLED"};
+    const mapping:Record<string,string>={prepared:"PREPARED",waiting_human:"WAITING_HUMAN",waiting_user:"WAITING_APPROVAL",waiting_timeout:action?.status==="authorized"?"QUEUED":"WAITING_EXTERNAL",running:"EXECUTING",in_doubt:"IN_DOUBT",verifying:"VERIFYING",completed:"COMPLETED",failed:"FAILED",cancelled:"CANCELLED"};
     const requirements=descriptor?this.registry.requirements(descriptor.id,prep.proposal.actions[0].arguments).context:[];
     const visible=requirements.every(t=>p.authority.contextTypes.includes(t)&&p.authority.scopes.includes(`context:${t}`));
     const resultData=action?.result?.data as Record<string,unknown>|undefined;
@@ -194,7 +194,7 @@ export class AxisGateway {
     return {workId:c.id,preparationId:prep.id,status:mapping[c.status],summary:c.goal,mode:descriptor?.mode??"UNAVAILABLE",providerMode:descriptor?.metadata?.executionMode??descriptor?.mode??"UNAVAILABLE",actionId:action?.id,
       money:money??null,verification:await hasCurrentProof(this.store,c.id)?"VERIFIED":"UNVERIFIED",
       evidence:evidence.map(e=>({kind:e.kind,at:e.at.toISOString()})),
-      result:visible && instructionsFresh && (c.status==="completed" || action?.result?.outcome==="pending") ? action?.result?.data ?? null : null,
+      result:visible && instructionsFresh && (c.status==="waiting_human" || c.status==="completed" || action?.result?.outcome==="pending") ? action?.result?.data ?? null : null,
       nextRequiredAction:c.status==="waiting_user"?"User approval required":c.status==="in_doubt"?"Reconcile the original provider request":c.status==="verifying"?"Obtain authoritative evidence":null};
   }
   async cancel(token:string,raw:unknown):Promise<Record<string,unknown>> {
@@ -203,7 +203,7 @@ export class AxisGateway {
       await this.grants.resolve(p.grantId,p.clientId);
       const c=await this.store.getCase(prep.case_id);const actions=await this.store.listActions(prep.case_id);
       if(c?.status==="cancelled") return {workId:prep.case_id,result:"CANCELLED"};
-      if(c?.status==="completed" || actions.some(a=>!["proposed","authorized","rejected"].includes(a.status))) return {workId:prep.case_id,result:"CANNOT_CANCEL",nextRequiredAction:"Provider reconciliation or compensation is required; no external effect was undone"};
+      if(c?.status==="completed" || actions.some(a=>!["proposed","authorized","rejected"].includes(a.status) && !(c?.status==="waiting_human" && (a.capability==="human.request" || a.input.verificationRisk==="read")))) return {workId:prep.case_id,result:"CANNOT_CANCEL",nextRequiredAction:"Provider reconciliation or compensation is required; no external effect was undone"};
       const db=await this.pool.connect();
       try {
         await db.query("BEGIN");
@@ -211,6 +211,7 @@ export class AxisGateway {
         await db.query("UPDATE action_money SET state='RELEASED' WHERE action_id IN (SELECT id FROM actions WHERE case_id=$1)",[prep.case_id]);
         await db.query("UPDATE reservations SET status='released',updated_at=now() WHERE action_id IN (SELECT id FROM actions WHERE case_id=$1)",[prep.case_id]);
         await db.query("UPDATE actions SET status='released',updated_at=now() WHERE case_id=$1",[prep.case_id]);
+        await db.query("UPDATE human_tasks SET status='CANCELLED' WHERE case_id=$1 AND status IN ('REQUESTED','ASSIGNED')",[prep.case_id]);
         await db.query("UPDATE cases SET status='cancelled',wake_at=NULL,updated_at=now() WHERE id=$1",[prep.case_id]);
         await db.query("INSERT INTO case_events(case_id,seq,type,payload) SELECT $1,COALESCE(MAX(seq),0)+1,'case_cancelled',$2 FROM case_events WHERE case_id=$1",[prep.case_id,{reason:"authorized cancellation before dispatch"}]);
         await db.query("COMMIT");
@@ -255,6 +256,10 @@ export class AxisGateway {
     catch { result={outcome:descriptor.risk==="read"?"failed":"unknown",data:{}}; }
     await this.store.appendAttempt({id:randomUUID(),actionId:action.id,provider:descriptor.provider.id,mode:descriptor.mode,request:{requery:started},outcome:result.outcome==="succeeded"?"ok":result.outcome==="failed"?"failed":"unknown",response:{...result},providerRef:result.providerRef});
     await this.store.addEvidence({id:randomUUID(),caseId:workId,actionId:action.id,kind:"provider_receipt",payload:{...result,provider:descriptor.provider.id,mode:descriptor.mode}});
+    if(result.outcome==="waiting_human") {
+      await this.store.updateActionStatus(action.id,"executing",{...result});
+      return {waitingHuman:{taskId:String(result.data.humanTaskId),deadline:new Date(String(result.data.deadline))}};
+    }
     if(result.outcome==="succeeded") {
       if(descriptor.risk==="financial" && (result.moneyState!=="SETTLED" || !result.providerRef || !result.targetState)) {
         await this.money(action.id,"IN_DOUBT");await this.store.updateActionStatus(action.id,"in_doubt");return {inDoubt:{reason:"Financial result lacks final proof"}};

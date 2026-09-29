@@ -18,7 +18,7 @@ export type CapabilityDescriptor = z.infer<typeof descriptorSchema>;
 export type MoneyState = "AVAILABLE" | "RESERVED" | "IN_FLIGHT" | "IN_DOUBT" | "SETTLED" | "RELEASED" | "REVERSED" | "REFUNDED";
 export interface MoneyRequirement { asset: string; amountMinor: string; tokenAsset?: string; currency?: string; destination?: string }
 export interface ProviderResult {
-  outcome: "succeeded" | "pending" | "unknown" | "failed" | "handoff";
+  outcome: "succeeded" | "pending" | "unknown" | "failed" | "handoff" | "waiting_human";
   data: Record<string, unknown>;
   providerRef?: string;
   /** A trusted adapter's normalized verdict, never read directly from model args. */
