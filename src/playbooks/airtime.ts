@@ -62,6 +62,7 @@ export function airtimePlaybook(deps: AirtimeDeps): Playbook {
 
   return {
     id: "airtime",
+    verification: "financial",
     initialState: "validate",
     states: {
       // ---- validate: deterministic checks, no model in sight ----------------
@@ -403,8 +404,7 @@ export function airtimeReconciler(deps: AirtimeDeps) {
       if (slots) {
         reply(`Done. ₦${slots.amount.toLocaleString()} ${slots.network.toUpperCase()} airtime sent to ${slots.phone}.`);
       }
-      await deps.store.appendEvent(caseId, "case_completed", { summary: "reconciled: delivered" });
-      await deps.store.updateCase(caseId, { status: "completed" });
+      await deps.runner.complete(caseId, "reconciled: delivered");
       return;
     }
     if (result.outcome === "failed") {

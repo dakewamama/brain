@@ -1,176 +1,120 @@
-# Axis
+# Axis MCP execution runtime
 
-Conversational commerce for Nigeria. One chat — order food, send a gift, shop —
-and the agent does the rest. WhatsApp first, but built so WhatsApp is a *channel*,
-not the architecture.
+Axis is a policy-bounded execution runtime. External clients propose work; Axis
+resolves delegated authority, records durable Actions, enforces policy, and
+requires persisted evidence before declaring completion.
 
-This repo is the backend: the agent brain, the conversation state machines, the
-channel adapters, and the supply-provider interfaces.
+This stacked draft targets `runtime/case-core`. See [validation and next-build
+strategy](docs/MCP-MILESTONE.md) for tested boundaries and provider limitations.
+This is an operator-provisioned execution slice, not a claim that every provider
+is production-ready.
 
----
+## Implemented
 
-## Why it's built this way
+- PostgreSQL Cases, ordered events, idempotent Actions and inbound deduplication,
+  with tests against a real database and a fresh child process.
+- Persisted AgentClients and revocable/expiring Grants. Credentials resolve the
+  user internally; external tool input cannot select a trusted user identity.
+- Scoped Context with source, freshness, sensitivity, case scope and expiry.
+- Capability Registry with bounded, authorized search and governed invocation.
+- Immutable preparations, deterministic policy, grant budget reservations,
+  stable action identity, evidence, and a central completion ProofGate.
+- Six MCP meta-tools using the official TypeScript SDK and Streamable HTTP.
+- Explicitly allowlisted upstream MCP tools over stdio and Streamable HTTP.
+- External SDK client integration tests covering native context access and the
+  official filesystem MCP server, including compiled service restart and two-process
+  execution. HTTP reference fixtures remain explicitly SANDBOX.
 
-Three principles, each a direct response to how this market actually works:
+## Run
 
-1. **Channel-agnostic core.** WhatsApp, Telegram, and a console harness all feed
-   the *same* pipeline. No single platform owns the business. Adding SMS, voice,
-   or USSD later is a new adapter, not a rewrite.
+Use Node 22 and PostgreSQL 16 or compatible. No new workflow infrastructure is
+required. The MCP entrypoint fails closed without its database; it does not use
+an in-memory fallback.
 
-2. **Providers behind an interface.** Delivery supply (Glovo today, Chowdeck
-   Relay later) sits behind one `DeliveryProvider` port. A stub implementation
-   runs the entire flow with **no credentials**, so you can build and demo before
-   any partnership lands. Swapping stub → live is one line in the provider
-   registry; not a single handler changes.
-
-3. **Every conversation is known.** A recorder logs every inbound and outbound
-   message to a store, exposed over admin routes. Visibility is built in, not
-   bolted on.
-
----
-
-## Architecture
-
-```
-             ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-  WhatsApp ──▶             │   │             │   │             │
-  Telegram ──▶  Channel    │──▶│  Pipeline   │──▶│  Vertical   │
-  Console  ──▶  adapters   │   │  (router +  │   │  handlers   │
-             │             │◀──│  recorder)  │◀──│  (state     │
-             └─────────────┘   └──────┬──────┘   │  machines)  │
-                                      │          └──────┬──────┘
-                              ┌───────▼──────┐   ┌──────▼──────┐
-                              │ Session +    │   │ Providers   │
-                              │ Conversation │   │ (Glovo /    │
-                              │ stores       │   │ stub / …)   │
-                              └──────────────┘   └─────────────┘
+```sh
+npm ci
+# Export configuration from .env.example using your process manager or shell.
+npm run build
+npm start
 ```
 
-A message's journey:
+The compiled build includes SQL migrations. Startup applies them before listening.
+The endpoint is `/mcp`; `/health` reports readiness. Default bind is loopback.
+External hosting requires `MCP_PUBLIC_ORIGIN`; production requires an HTTPS
+origin and an HTTPS reverse proxy. No channel adapter is started by this entrypoint.
 
-1. **Channel adapter** parses the webhook into a normalised `InboundMessage`.
-2. **Pipeline** records it, then **routes** it — respecting any in-progress flow
-   and global commands (cancel / menu / help).
-3. The **vertical handler** (delivery, gifting, affiliate) advances its state
-   machine and returns replies + a session patch.
-4. The pipeline persists the patch, records the outbound replies, and hands them
-   back to the adapter to render.
+## Client access
 
-### Directory map
+V1 uses operator-issued opaque bearer credentials bound to a persisted Client and
+Grant, not a custom OAuth authorization server. The SDK verifies bearer credentials
+through Axis's Grant service. OAuth consent/issuer integration remains deferred;
+there is no advertised OAuth flow that does not exist.
 
-```
-src/
-  core/         types, config, logger, money (kobo), ids, location, recorder
-  store/        session + conversation stores (in-memory; swap for a DB)
-  providers/    DeliveryProvider port + Glovo adapter, stub, affiliate
-  handlers/     vertical state machines + demo catalog
-  router/       intent routing, pipeline, menu, button mapping
-  channels/     WhatsApp + Telegram adapters
-  server.ts     Express app + webhooks + admin routes
-  console.ts    terminal harness (no credentials needed)
-tests/          pipeline integration tests
+Use the local operator CLI with a protected JSON file:
+
+```sh
+npm run admin -- issue /secure/grant.json
+npm run admin -- context /secure/context.json
+npm run admin -- approve /secure/approval.json
+npm run admin -- revoke /secure/revocation.json
 ```
 
----
+`issue` prints a credential once. Store it securely; do not commit the output.
+See [operator and provider setup](docs/MCP-SETUP.md) for exact input shapes.
+Every MCP HTTP request needs `Authorization: Bearer <credential>`.
 
-## Quick start
+Tools:
 
-```bash
-npm install
-cp .env.example .env        # optional — runs fine empty on the stub
+- `axis.prepare`: `{goal, constraints?}`; V1 supports one explicit capability/action.
+- `axis.execute`: `{preparationId}`.
+- `axis.status`: `{workId}`.
+- `axis.cancel`: `{workId}`.
+- `axis.capabilities.search`: `{query?, region?, limit?, modes?, risks?}`; at most five results.
+- `axis.capabilities.invoke`: `{capabilityId, arguments, idempotencyKey}`; the same durable execution path.
 
-# Talk to it in your terminal (no credentials required):
-npm run console
+Prepare returns missing information instead of inventing arguments, costs or
+facts. Search observations are not authoritative merchant offers. Handoff,
+unknown status, and provider `success:true` are not automatically proof.
+
+## Validation
+
+```sh
+npm run build
+npm run typecheck
+TEST_DATABASE_URL=postgresql://... npm test
+TEST_DATABASE_URL=postgresql://... npm run test:postgres
 ```
 
-Then type:
+`test:postgres` refuses to run without a real database URL. Ordinary `npm test`
+marks database suites skipped when no test URL is provided. Use a disposable test
+database: suites write test records and create/drop an isolated MCP test schema.
+There is no configured lint command.
 
-```
-chicken wings from Nadia
-yes
-Lekki Phase 1
-yes
-```
+## Capability availability
 
-You'll get an availability + price check, a delivery quote with an itemised
-total, and an order confirmation with a tracking link — all on the stub.
+| Capability | Mode / requirements |
+|---|---|
+| `location.context` | LIVE, native; only current, granted context |
+| `location.search` | LIVE with configured Photon provider; otherwise UNAVAILABLE |
+| `money.balance` | Explicit LIVE/SANDBOX onboarding mode and credentials; otherwise UNAVAILABLE |
+| `telecom.airtime.purchase` | SANDBOX only with credentials and wallet/recipient grants; LIVE is UNAVAILABLE until custody enforces an authoritative debit/fee bound |
+| `money.transfer` | UNAVAILABLE: existing off-ramp lacks required identity/settlement contract |
+| `commerce.search` | LIVE with Serper credentials; observations only |
+| `commerce.quote` | Replaceable authoritative provider interface; default UNAVAILABLE |
+| PAJ ramps / quote / status / bank lookup | Independent provider configuration; see [PAJ contracts and validation](docs/PAJ.md) |
+| Upstream apps | UPSTREAM_MCP with separate LIVE/SANDBOX provider provenance; only configured tools are admitted |
 
-### Run the server
+No commerce purchase is implemented. MOCK providers exist only in tests and are
+not admitted in production. HANDOFF never becomes completed delivery.
 
-```bash
-npm run dev        # watch mode
-# or
-npm run build && npm start
-```
+## Preserved legacy code
 
-- `GET  /health` — status + which channels are live
-- `GET/POST /webhooks/whatsapp` — Meta verification + inbound
-- `POST /webhooks/telegram` — inbound
-- `GET  /admin/users` — everyone who's messaged
-- `GET  /admin/conversations/:channel/:userId` — full transcript
-- `GET  /admin/feed?since=<ms>` — recent events across all users
+The conversational entrypoint is retained behind `npm run legacy:dev` and is
+explicitly outside the MCP release's security claim. Do not expose it alongside
+MCP in production. SkillRegistry and CaseRunner compatibility registrations use
+the shared CapabilityRegistry storage; those legacy entries are unavailable to
+the Gateway until migrated. Legacy automatic MCP execution is disabled.
 
-> **Protect the `/admin/*` routes before deploying.** They're open in this build
-> for local visibility.
-
-### Tests
-
-```bash
-npm test           # 7 integration tests over the real pipeline
-```
-
----
-
-## What's real vs. stubbed
-
-| Piece | State | Notes |
-|---|---|---|
-| Agent pipeline, routing, state machines | **Real** | Fully working, tested |
-| Conversation logging / admin views | **Real** | In-memory store |
-| WhatsApp adapter | **Real** | Cloud API; needs token to send |
-| Telegram adapter | **Real** | Bot API; free |
-| Delivery via **stub** | **Real (fake data)** | Works with no creds |
-| Delivery via **Glovo** | **Written, unverified** | Matches documented LaaS shape; every network call marked `// VERIFY:`. Needs sandbox creds to confirm field names |
-| Affiliate links (Jumia/Oraimo) | **Real** | Tracked search links; add your tags |
-| Vendor catalog | **Demo** | Hard-coded vendors in `handlers/catalog.ts`. Replace with real onboarded merchants |
-| Geocoding | **Placeholder** | `core/location.ts` jitters a Lagos coord so the stub can quote. **Must** add real geocoding before live orders |
-| Payments | **Not built** | Confirm step is where a non-custodial rail (e.g. a Solana Blink / Paj) issues a payment link and dispatch waits on settlement |
-
-> The stub's delivery prices look high (per-km rate against the placeholder
-> geocoder). That's cosmetic — real quotes come from the provider.
-
----
-
-## Boundaries this codebase keeps
-
-Every integration here fulfils orders through **your own catalog**, the **stub**,
-or **legitimately public / permissioned** surfaces (Glovo's LaaS API, affiliate
-deep links). There is no scraping of private consumer APIs and no handling of
-users' third-party login credentials. When a partnership or Relay access lands,
-it implements `DeliveryProvider` and slots in behind the same interface — which
-is also the version that survives contact with a provider who notices you.
-
----
-
-## Extending it
-
-- **New vertical** (e.g. bills/airtime): add a handler implementing
-  `VerticalHandler`, register it in `handlers/index.ts`, add keywords to
-  `router/intent.ts`.
-- **New channel** (e.g. voice/USSD): implement `ChannelAdapter`, add a webhook
-  in `server.ts`. The pipeline is untouched.
-- **New delivery provider** (e.g. Chowdeck Relay): implement `DeliveryProvider`,
-  add it to the registry in `providers/index.ts`.
-- **Real persistence**: implement `SessionStore` / `ConversationStore` against a
-  database and swap the two lines in `store/index.ts`.
-- **Smarter intent**: replace the keyword matcher in `classifyFresh`
-  (`router/intent.ts`) with an LLM classifier — the seam is isolated.
-
----
-
-## Status
-
-Checkpoints 1–7 committed. Core is complete and tested end to end on the stub.
-Next real-world steps are: Glovo sandbox credentials to verify that adapter,
-real geocoding, a payment rail at the confirm step, and replacing the demo
-catalog with onboarded vendors.
+Onboarding is unchanged. WhatsApp, Merchant Bridge, voice, Iya Seun, social
+commerce, private Bolt/Chowdeck integrations, Jev, A2A, process mining, Hatchet
+migration and frontend redesign remain deferred.

@@ -9,6 +9,7 @@
  *    first arrival owns processing.
  * Unique inserts decide ownership; a fresh snapshot reads a concurrent winner.
  */
+import { hasCurrentProof } from "../proof/gate.js";
 import type { Pool, PoolClient } from "pg";
 import {
   type CaseRecord,
@@ -39,6 +40,9 @@ export interface CreateCaseInput {
 }
 
 export interface CaseStore {
+  exclusive<T>(caseId: string, fn: () => Promise<T>): Promise<T>;
+  listActions(caseId: string): Promise<ActionRecord[]>;
+  attemptsFor(actionId: string): Promise<ProviderAttempt[]>;
   createCase(input: CreateCaseInput): Promise<CaseRecord>;
   getCase(id: string): Promise<CaseRecord | null>;
   updateCase(
@@ -114,6 +118,7 @@ export interface CaseStore {
 
   /** Cases parked on a timer whose wake_at has passed. */
   listWakeable(now: Date): Promise<CaseRecord[]>;
+  claimWake(id: string, now: Date): Promise<boolean>;
   /** Open cases for a user on a channel (newest first) — signal routing. */
   listOpenCases(userId: string, channel: string): Promise<CaseRecord[]>;
   /** All open cases with a given status (worker sweeps: in_doubt). */
@@ -158,6 +163,24 @@ function rowToAction(r: Record<string, unknown>): ActionRecord {
 
 export class PgCaseStore implements CaseStore {
   constructor(private pool: Pool) {}
+  async exclusive<T>(caseId: string, fn: () => Promise<T>): Promise<T> {
+    // Never occupy the pool with blocked advisory-lock waiters: the owner needs
+    // other connections to persist work while holding this session lock.
+    for (;;) {
+      const client = await this.pool.connect();
+      const r = await client.query("SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS acquired", [caseId]);
+      if (!r.rows[0].acquired) { client.release(); await new Promise(resolve => setTimeout(resolve, 10)); continue; }
+      try { return await fn(); }
+      finally { await client.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [caseId]); client.release(); }
+    }
+  }
+  async listActions(caseId: string): Promise<ActionRecord[]> {
+    return (await this.pool.query("SELECT * FROM actions WHERE case_id=$1 ORDER BY created_at", [caseId])).rows.map(rowToAction);
+  }
+  async attemptsFor(actionId: string): Promise<ProviderAttempt[]> {
+    return (await this.pool.query("SELECT * FROM provider_attempts WHERE action_id=$1 ORDER BY seq", [actionId])).rows.map(r => ({ id:r.id,actionId:r.action_id,seq:r.seq,provider:r.provider,mode:r.mode,request:r.request,outcome:r.outcome,response:r.response,providerRef:r.provider_ref,error:r.error,at:new Date(r.at) }));
+  }
+
 
   async createCase(input: CreateCaseInput): Promise<CaseRecord> {
     const r = await this.pool.query(
@@ -182,6 +205,7 @@ export class PgCaseStore implements CaseStore {
     id: string,
     patch: Partial<Pick<CaseRecord, "state" | "status" | "context" | "wakeAt" | "deadlineAt">>,
   ): Promise<CaseRecord | null> {
+    if(patch.status === "completed" && !await hasCurrentProof(this,id)) throw new Error("completion requires current Axis proof");
     const sets: string[] = [];
     const vals: unknown[] = [];
     let n = 1;
@@ -410,6 +434,11 @@ export class PgCaseStore implements CaseStore {
     return r.rows.map((row) => ({ id: row.id as string, payload: row.payload as Record<string, unknown> }));
   }
 
+  async claimWake(id: string, now: Date): Promise<boolean> {
+    const result=await this.pool.query("UPDATE cases SET status='running', updated_at=now() WHERE id=$1 AND status='waiting_timeout' AND wake_at<=$2 RETURNING id",[id,now]);
+    return !!result.rowCount;
+  }
+
   async listWakeable(now: Date): Promise<CaseRecord[]> {
     const r = await this.pool.query(
       `SELECT * FROM cases WHERE status = 'waiting_timeout' AND wake_at IS NOT NULL AND wake_at <= $1
@@ -446,6 +475,15 @@ export class PgCaseStore implements CaseStore {
 interface MemAction extends ActionRecord { attempts: ProviderAttempt[] }
 
 export class InMemoryCaseStore implements CaseStore {
+  private locks = new Map<string, Promise<unknown>>();
+  async exclusive<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    const prior=this.locks.get(id) ?? Promise.resolve();
+    const next=prior.catch(()=>{}).then(fn); this.locks.set(id,next);
+    try { return await next; } finally { if(this.locks.get(id)===next) this.locks.delete(id); }
+  }
+  async listActions(caseId: string): Promise<ActionRecord[]> { return [...this.actions.values()].filter(a=>a.caseId===caseId); }
+  async attemptsFor(actionId: string): Promise<ProviderAttempt[]> { return this.actions.get(actionId)?.attempts ?? []; }
+
   readonly cases = new Map<string, CaseRecord>();
   readonly events = new Map<string, CaseEvent[]>();
   readonly actions = new Map<string, MemAction>();
@@ -479,6 +517,7 @@ export class InMemoryCaseStore implements CaseStore {
     id: string,
     patch: Partial<Pick<CaseRecord, "state" | "status" | "context" | "wakeAt" | "deadlineAt">>,
   ): Promise<CaseRecord | null> {
+    if(patch.status === "completed" && !await hasCurrentProof(this,id)) throw new Error("completion requires current Axis proof");
     const c = this.cases.get(id);
     if (!c) return null;
     Object.assign(c, patch, { updatedAt: new Date() });
@@ -634,6 +673,12 @@ export class InMemoryCaseStore implements CaseStore {
       .filter((r) => !r.processed)
       .slice(0, limit)
       .map((r) => ({ id: r.id, payload: r.payload }));
+  }
+
+  async claimWake(id: string, now: Date): Promise<boolean> {
+    const c=this.cases.get(id);
+    if(!c || c.status!=="waiting_timeout" || !c.wakeAt || c.wakeAt>now) return false;
+    c.status="running";c.updatedAt=new Date();return true;
   }
 
   async listWakeable(now: Date): Promise<CaseRecord[]> {

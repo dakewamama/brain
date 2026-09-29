@@ -48,7 +48,7 @@ test("airtime is multi-turn: asks for the network, then resumes on the answer", 
   // The completed slots start a real Case; the mock balance says insufficient,
   // which proves the message traveled the whole runtime path and back.
   configureCasesForTests({
-    purchase: async () => ({ ok: true, outcome: "ok", response: { providerStatus: "delivered" } }),
+    purchase: { capability: "telecom.airtime", provider: "test", mode: "MOCK", execute: async () => ({ ok: true, outcome: "ok", response: { providerStatus: "delivered" } }) },
     getBalance: async () => ({ ok: true, ngn: 0, usdc: 0, address: "TestAddr123" }),
   });
   const { say } = freshPipeline();
@@ -65,7 +65,7 @@ test("airtime is multi-turn: asks for the network, then resumes on the answer", 
 
 test("a replayed webhook message id is processed once, not twice", async () => {
   configureCasesForTests({
-    purchase: async () => ({ ok: true, outcome: "ok", response: { providerStatus: "delivered" } }),
+    purchase: { capability: "telecom.airtime", provider: "test", mode: "MOCK", execute: async () => ({ ok: true, outcome: "ok", response: { providerStatus: "delivered" } }) },
     getBalance: async () => ({ ok: false, ngn: null, usdc: 0 }),
   });
   const { say } = freshPipeline();

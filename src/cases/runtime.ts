@@ -18,6 +18,8 @@
  * reconcileInDoubt) is the seam a different executor (e.g. Hatchet) would
  * implement; playbooks never see it.
  */
+import { CapabilityRegistry } from "../capabilities/registry.js";
+import { verifyCompletion } from "../proof/gate.js";
 import { randomUUID } from "node:crypto";
 import type {
   CaseRecord,
@@ -79,12 +81,13 @@ const MAX_HOPS = 20;
 
 export class CaseRunner {
   private playbooks = new Map<string, Playbook>();
-  private capabilities = new Map<string, CapabilityExecutor>();
+
   private reconcilers = new Map<string, (caseId: string) => Promise<void>>();
 
   constructor(
     private store: CaseStore,
     private mode: ExecutionMode = "LIVE",
+    readonly capabilities = new CapabilityRegistry(),
   ) {}
 
   registerPlaybook(pb: Playbook): void {
@@ -93,11 +96,11 @@ export class CaseRunner {
   }
 
   registerCapability(exec: CapabilityExecutor): void {
-    this.capabilities.set(exec.capability, exec);
+    this.capabilities.registerCompatibility({id:exec.capability,version:"legacy",provider:{id:exec.provider,kind:"external_api"},description:exec.capability,inputSchema:{type:"object"},outputSchema:{type:"object"},mode:"UNAVAILABLE",risk:"financial",requiredScopes:["legacy.disabled"],reversible:false,contextTypes:[],health:"unhealthy"},exec);
   }
 
   capability(capability: string): CapabilityExecutor | undefined {
-    return this.capabilities.get(capability);
+    return this.capabilities.compatibility<CapabilityExecutor>(capability);
   }
 
   executionMode(): ExecutionMode {
@@ -137,6 +140,18 @@ export class CaseRunner {
 
   /** Run states from the case's recorded resume point until it rests. */
   async advance(caseId: string): Promise<CaseStepOutcome> {
+    return this.store.exclusive(caseId, () => this.advanceUnlocked(caseId));
+  }
+  async complete(caseId: string, summary: string): Promise<boolean> {
+    const c=await this.store.getCase(caseId);
+    if(!c) return false;
+    const verified=await verifyCompletion(this.store,caseId,this.playbooks.get(c.playbook)?.verification);
+    if(!verified) { await this.store.updateCase(caseId,{status:"verifying"}); return false; }
+    await this.store.appendEvent(caseId,"case_completed",{summary});
+    await this.store.updateCase(caseId,{status:"completed",wakeAt:null});
+    return true;
+  }
+  private async advanceUnlocked(caseId: string): Promise<CaseStepOutcome> {
     for (let hop = 0; hop < MAX_HOPS; hop++) {
       const current = await this.store.getCase(caseId);
       if (!current) throw new Error(`unknown case ${caseId}`);
@@ -220,10 +235,10 @@ export class CaseRunner {
         }
         case "complete": {
           const t = transition as Extract<Transition, { complete: unknown }>;
-          await this.store.appendEvent(caseId, "case_completed", { summary: t.complete.summary });
-          await this.store.updateCase(caseId, { status: "completed", context: t.context ?? {}, wakeAt: null });
+          await this.store.updateCase(caseId, { context: t.context ?? {} });
+          await this.complete(caseId, t.complete.summary);
           const done = (await this.store.getCase(caseId))!;
-          return this.outcome(done, true, ctx.pendingReplies);
+          return this.outcome(done, done.status === "completed", ctx.pendingReplies);
         }
         case "fail": {
           const t = transition as Extract<Transition, { fail: unknown }>;
@@ -298,7 +313,7 @@ export class CaseRunner {
     const due = await this.store.listWakeable(now);
     let n = 0;
     for (const c of due) {
-      await this.store.updateCase(c.id, { status: "running" });
+      if(!this.playbooks.has(c.playbook) || !await this.store.claimWake(c.id,now)) continue;
       await this.store.appendEvent(c.id, "case_wake", { wakeAt: c.wakeAt?.toISOString() ?? null });
       try {
         await this.advance(c.id);
@@ -308,6 +323,17 @@ export class CaseRunner {
       n++;
     }
     return n;
+  }
+
+  /** A process can die after a Case became running. Its database session lock
+   * is released by PostgreSQL; serialized advance then resumes the recorded
+   * action. Gateway playbooks requery a submitted action, never purchase again. */
+  async recoverRunning(): Promise<void> {
+    for(const c of await this.store.listByStatus("running")) {
+      if(!this.playbooks.has(c.playbook)) continue;
+      try { await this.advance(c.id); }
+      catch(error) { log.error({caseId:c.id,error:String(error)},"running case recovery will retry"); }
+    }
   }
 
   /** Run registered reconcilers over in_doubt cases. Called by the worker loop. */
@@ -328,8 +354,9 @@ export class CaseRunner {
   }
 
   private async failCase(caseId: string, reason: string, state?: string): Promise<CaseStepOutcome> {
-    await this.store.appendEvent(caseId, "case_failed", { reason, ...(state ? { state } : {}) });
-    await this.store.updateCase(caseId, { status: "failed" });
+    const ambiguous=(await this.store.listActions(caseId)).some(a=>a.status==="executing"||a.status==="in_doubt");
+    await this.store.appendEvent(caseId, ambiguous?"case_in_doubt":"case_failed", { reason, ...(state ? { state } : {}) });
+    await this.store.updateCase(caseId, { status: ambiguous?"in_doubt":"failed" });
     return this.outcome((await this.store.getCase(caseId))!, true);
   }
 
@@ -340,6 +367,8 @@ export class CaseRunner {
 
 export function isResting(status: CaseRecord["status"]): boolean {
   return (
+    status === "prepared" ||
+    status === "verifying" ||
     status === "waiting_user" ||
     status === "waiting_timeout" ||
     status === "in_doubt" ||

@@ -7,6 +7,8 @@
  */
 
 export type CaseStatus =
+  | "prepared"
+  | "verifying"
   | "running" // a state handler is logically executing / ready to advance
   | "waiting_user" // a Decision is open; resumes on signal()
   | "waiting_timeout" // parked until wake_at; the worker resumes it
@@ -71,7 +73,7 @@ export type AttemptOutcome = "ok" | "failed" | "unknown" | "submitted";
 /** Execution mode of the provider that served an attempt. Mocks must never be
  *  reachable from a production deployment — the mode is persisted on every
  *  attempt so an audit can prove what served the work. */
-export type ExecutionMode = "LIVE" | "SANDBOX" | "MOCK" | "HANDOFF" | "UNAVAILABLE";
+export type ExecutionMode = "LIVE" | "SANDBOX" | "MOCK" | "HANDOFF" | "UPSTREAM_MCP" | "UNAVAILABLE";
 
 export interface ProviderAttempt {
   id: string;
@@ -101,6 +103,7 @@ export interface Reservation {
 }
 
 export type EvidenceKind =
+  | "verification"
   | "provider_receipt"
   | "ledger_settlement"
   | "merchant_confirmation"
@@ -166,5 +169,6 @@ export interface PlaybookState {
 export interface Playbook {
   id: string;
   initialState: string;
+  verification?: "read" | "write" | "financial" | "external_commitment";
   states: Record<string, PlaybookState>;
 }

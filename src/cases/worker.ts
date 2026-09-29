@@ -47,7 +47,7 @@ async function collectUnnotified(store: CaseStore, caseId: string): Promise<stri
 
 export class CaseWorker {
   private timer: NodeJS.Timeout | null = null;
-  private running = false;
+  private activeTick: Promise<void> | null = null;
 
   constructor(
     private runner: CaseRunner,
@@ -70,17 +70,25 @@ export class CaseWorker {
     this.timer = null;
   }
 
+  async stopAndDrain(): Promise<void> {
+    this.stop();
+    await this.activeTick;
+  }
+
   async tick(): Promise<void> {
-    if (this.running) return; // never overlap sweeps
-    this.running = true;
+    if(this.activeTick) return this.activeTick;
+    const active=this.sweep();this.activeTick=active;
+    try {await active;} finally {if(this.activeTick===active)this.activeTick=null;}
+  }
+
+  private async sweep(): Promise<void> {
     try {
+      await this.runner.recoverRunning();
       await this.runner.wakeDueCases();
       await this.runner.reconcileInDoubt();
       await this.deliverReplies();
     } catch (err) {
       log.error({ err: String(err) }, "worker tick failed");
-    } finally {
-      this.running = false;
     }
   }
 

@@ -10,6 +10,7 @@
  * `listForLLM()` returns provider-agnostic tool definitions so the planner can
  * let the model pick a skill by description rather than keyword matching.
  */
+import { CapabilityRegistry } from "../capabilities/registry.js";
 import type { JsonSchema, ToolDefinition } from "../model/types.js";
 import type { OutboundMessage } from "../core/types.js";
 import type { MemoryService } from "../memory/service.js";
@@ -55,31 +56,32 @@ export interface SkillManifest {
 }
 
 export class SkillRegistry {
-  private skills = new Map<string, SkillManifest>();
+  /** @deprecated New callers use AxisGateway. This is a channel compatibility facade. */
+  constructor(readonly catalog = new CapabilityRegistry()) {}
 
   register(skill: SkillManifest): void {
     // Never silently replace a baseline skill (e.g. pay_person): a collision is a
     // bug or a hostile learned/MCP skill trying to shadow a money path. Learned
     // skills may be re-registered (the Learner updates its own).
-    const existing = this.skills.get(skill.id);
+    const existing = this.catalog.compatibility<SkillManifest>(skill.id);
     if (existing && existing.origin !== "learned") {
       throw new Error(
         `skill "${skill.id}" is already registered and cannot be overwritten`,
       );
     }
-    this.skills.set(skill.id, { origin: "baseline", ...skill });
+    this.catalog.registerCompatibility({id:skill.id,version:"legacy",provider:{id:"legacy-channel",kind:"native"},description:skill.description,inputSchema:skill.parameters,outputSchema:{type:"object"},mode:"UNAVAILABLE",risk:"write",requiredScopes:["legacy.disabled"],reversible:false,contextTypes:[],health:"unhealthy"}, {origin:"baseline",...skill}, existing?.origin === "learned");
   }
 
   find(id: string): SkillManifest | undefined {
-    return this.skills.get(id);
+    return this.catalog.compatibility<SkillManifest>(id);
   }
 
   has(id: string): boolean {
-    return this.skills.has(id);
+    return !!this.catalog.compatibility<SkillManifest>(id);
   }
 
   list(): SkillManifest[] {
-    return [...this.skills.values()];
+    return this.catalog.compatibilityList<SkillManifest>();
   }
 
   /** Tool definitions for the model to select from (planner / dynamic routing). */

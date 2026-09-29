@@ -66,26 +66,11 @@ test("parseMcpServers: bad/empty input yields []", () => {
   assert.deepEqual(parseMcpServers('[{"name":"x"}]'), []); // missing command
 });
 
-test("toSkill wraps an MCP tool as a callable skill", async () => {
-  let calledWith: unknown = null;
-  const skill = toSkill(
-    "mobility",
-    { name: "estimate_fare", description: "estimate a fare", inputSchema: { type: "object" } },
-    async (name, args) => {
-      calledWith = { name, args };
-      return { content: [{ type: "text", text: '{"fareNgn": 2500}' }] };
-    },
-  );
-  assert.equal(skill.id, "mobility.estimate_fare");
-  assert.equal(skill.origin, "learned");
-  assert.ok(skill.execute);
-  const outcome = await skill.execute!({ from: "yaba" }, {
-    userId: "u",
-    memory: undefined as never,
-    priorResults: {},
-  });
-  assert.deepEqual(calledWith, { name: "estimate_fare", args: { from: "yaba" } });
-  assert.deepEqual(outcome.data, { fareNgn: 2500 });
+test("legacy MCP wrapping cannot bypass the Axis Gateway", async () => {
+  let called=false;
+  const skill=toSkill("mobility",{name:"estimate",inputSchema:{type:"object"}},async()=>{called=true;return {};});
+  await assert.rejects(skill.execute!({}, {userId:"u",memory:undefined as never,priorResults:{}}), /Gateway Grant/);
+  assert.equal(called,false);
 });
 
 test("mcpResultToOutcome parses JSON text and falls back to raw", () => {
