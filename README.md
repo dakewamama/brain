@@ -101,6 +101,7 @@ There is no configured lint command.
 | `money.transfer` | UNAVAILABLE: existing off-ramp lacks required identity/settlement contract |
 | `commerce.search` | LIVE with Serper credentials; observations only |
 | `commerce.quote` | Replaceable authoritative provider interface; default UNAVAILABLE |
+| PAJ ramps / quote / status / bank lookup | Independent provider configuration; see [PAJ contracts and validation](docs/PAJ.md) |
 | Upstream apps | UPSTREAM_MCP with separate LIVE/SANDBOX provider provenance; only configured tools are admitted |
 
 No commerce purchase is implemented. MOCK providers exist only in tests and are

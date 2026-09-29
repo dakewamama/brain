@@ -1,3 +1,7 @@
+import express from "express";
+import { PajProvider } from "../providers/paj/provider.js";
+import { configFromEnv } from "../providers/paj/client.js";
+import { pajWebhookRouter } from "../providers/paj/http.js";
 import type { Server } from "node:http";
 import { z } from "zod";
 import { getPool,migrate,closePool } from "../db/pool.js";
@@ -12,11 +16,12 @@ async function main():Promise<void> {
  const pool=getPool();if(!pool)throw new Error("Axis MCP requires DATABASE_URL; no in-memory production fallback");
  await migrate();
  const registry=new CapabilityRegistry();registerCoreCapabilities(registry);
+ const paj=new PajProvider(pool,configFromEnv(process.env));await paj.register(registry);
  const gateway=new AxisGateway(pool,registry);
  const configs=z.array(z.unknown()).max(1).parse(JSON.parse(process.env.AXIS_UPSTREAM_MCP??"[]"));
  const upstreams:Awaited<ReturnType<typeof connectUpstream>>[]=[];
  const host=process.env.MCP_HOST??"127.0.0.1";const port=z.coerce.number().int().min(1).max(65535).parse(process.env.PORT??3000);
- const app=createMcpApp(gateway,{host,publicOrigin:process.env.MCP_PUBLIC_ORIGIN});
+ const app=express();app.use(pajWebhookRouter(paj));app.use(createMcpApp(gateway,{host,publicOrigin:process.env.MCP_PUBLIC_ORIGIN}));
  const worker=new CaseWorker(gateway.runner,gateway.store);
  try {
   for(const config of configs)upstreams.push(await connectUpstream(registry,config));

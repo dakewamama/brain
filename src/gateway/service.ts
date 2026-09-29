@@ -69,7 +69,7 @@ export class AxisGateway {
     const explicit=input.constraints?.capabilityId;
     const descriptor=explicit ? this.registry.get(explicit) : this.registry.search(p,{query:input.goal,region:input.constraints?.region,limit:1},context.map(c=>c.type))[0];
     if(explicit && (!descriptor || !permitted(p,descriptor))) throw new AxisError("capability_unavailable");
-    const arguments_=input.constraints?.arguments??{};
+    let arguments_=input.constraints?.arguments??{};
     const missing:string[]=[];
     let needed:string[]=[];let money:MoneyRequirement|undefined;
     if(!descriptor) missing.push("Select an authorized capability");
@@ -78,6 +78,8 @@ export class AxisGateway {
         if(!req.resources.every(r=>p.authority.resources.includes(r))) throw new AxisError("resource_not_allowed");
         authorizeExecution(p,descriptor,context,needed,money,input.constraints?.region);
         this.checkCost(input.constraints,money);
+        arguments_=await this.registry.prepare(descriptor.id,arguments_,p);
+        this.registry.validate(descriptor.id,arguments_);
       } catch(error) { missing.push(error instanceof AxisError ? error.code : "invalid_arguments"); }
     }
     const proposal:Proposal={understoodGoal:input.goal,constraints:input.constraints,actions:descriptor?[{capabilityId:descriptor.id,version:descriptor.version,arguments:arguments_,descriptorDigest:digest(descriptor)}]:[],
@@ -186,10 +188,12 @@ export class AxisGateway {
     const mapping:Record<string,string>={prepared:"PREPARED",waiting_user:"WAITING_APPROVAL",waiting_timeout:action?.status==="authorized"?"QUEUED":"WAITING_EXTERNAL",running:"EXECUTING",in_doubt:"IN_DOUBT",verifying:"VERIFYING",completed:"COMPLETED",failed:"FAILED",cancelled:"CANCELLED"};
     const requirements=descriptor?this.registry.requirements(descriptor.id,prep.proposal.actions[0].arguments).context:[];
     const visible=requirements.every(t=>p.authority.contextTypes.includes(t)&&p.authority.scopes.includes(`context:${t}`));
+    const resultData=action?.result?.data as Record<string,unknown>|undefined;
+    const instructionsFresh=!resultData?.fundingInstructionsExpireAt || Date.parse(String(resultData.fundingInstructionsExpireAt))>Date.now();
     return {workId:c.id,preparationId:prep.id,status:mapping[c.status],summary:c.goal,mode:descriptor?.mode??"UNAVAILABLE",providerMode:descriptor?.metadata?.executionMode??descriptor?.mode??"UNAVAILABLE",actionId:action?.id,
       money:money??null,verification:await hasCurrentProof(this.store,c.id)?"VERIFIED":"UNVERIFIED",
       evidence:evidence.map(e=>({kind:e.kind,at:e.at.toISOString()})),
-      result:visible && c.status==="completed" ? action?.result?.data ?? null : null,
+      result:visible && instructionsFresh && (c.status==="completed" || action?.result?.outcome==="pending") ? action?.result?.data ?? null : null,
       nextRequiredAction:c.status==="waiting_user"?"User approval required":c.status==="in_doubt"?"Reconcile the original provider request":c.status==="verifying"?"Obtain authoritative evidence":null};
   }
   async cancel(token:string,raw:unknown):Promise<Record<string,unknown>> {
@@ -246,7 +250,7 @@ export class AxisGateway {
         const total=await this.pool.query("SELECT COALESCE(SUM(amount_minor),0)::text AS total FROM action_money WHERE grant_id=$1 AND state NOT IN ('RELEASED','REVERSED','REFUNDED')",[latest.grantId]);
         if(!latest.authority.financial || BigInt(total.rows[0].total)>BigInt(latest.authority.financial.totalMinor)) throw new AxisError("financial_limit");
       }
-      result=await this.dispatch(descriptor.id,prep.proposal.actions[0].arguments,{actionId:action.id,idempotencyKey:action.idempotencyKey,userId:p.userId,context},started); }
+      result=await this.dispatch(descriptor.id,prep.proposal.actions[0].arguments,{actionId:action.id,idempotencyKey:action.idempotencyKey,userId:p.userId,grantId:p.grantId,clientId:p.clientId,context},started); }
     catch { result={outcome:descriptor.risk==="read"?"failed":"unknown",data:{}}; }
     await this.store.appendAttempt({id:randomUUID(),actionId:action.id,provider:descriptor.provider.id,mode:descriptor.mode,request:{requery:started},outcome:result.outcome==="succeeded"?"ok":result.outcome==="failed"?"failed":"unknown",response:{...result},providerRef:result.providerRef});
     await this.store.addEvidence({id:randomUUID(),caseId:workId,actionId:action.id,kind:"provider_receipt",payload:{...result,provider:descriptor.provider.id,mode:descriptor.mode}});
@@ -260,6 +264,10 @@ export class AxisGateway {
     if(result.outcome==="failed" && (descriptor.risk!=="financial" || ["RELEASED","REVERSED"].includes(result.moneyState??""))) {
       await this.money(action.id,result.moneyState==="REVERSED"?"REVERSED":"RELEASED");await this.store.updateActionStatus(action.id,"failed",{...result});
       return {fail:{reason:"provider confirmed failure"}};
+    }
+    if(result.outcome==="pending") {
+      await this.money(action.id,"IN_FLIGHT");await this.store.updateActionStatus(action.id,"executing",{...result});
+      return {sleepUntil:new Date(Date.now()+30000)};
     }
     await this.money(action.id,"IN_DOUBT");await this.store.updateActionStatus(action.id,"in_doubt",{...result});
     return {inDoubt:{reason:result.outcome==="handoff"?"Handoff is not completion":"Provider outcome requires reconciliation"}};

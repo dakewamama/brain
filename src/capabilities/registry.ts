@@ -16,7 +16,7 @@ export const descriptorSchema = z.object({
 }).strict();
 export type CapabilityDescriptor = z.infer<typeof descriptorSchema>;
 export type MoneyState = "AVAILABLE" | "RESERVED" | "IN_FLIGHT" | "IN_DOUBT" | "SETTLED" | "RELEASED" | "REVERSED" | "REFUNDED";
-export interface MoneyRequirement { asset: string; amountMinor: string }
+export interface MoneyRequirement { asset: string; amountMinor: string; tokenAsset?: string; currency?: string; destination?: string }
 export interface ProviderResult {
   outcome: "succeeded" | "pending" | "unknown" | "failed" | "handoff";
   data: Record<string, unknown>;
@@ -26,9 +26,11 @@ export interface ProviderResult {
   moneyState?: MoneyState;
 }
 export interface ProviderContext {
-  actionId: string; idempotencyKey: string; userId: string; context: readonly ContextItem[];
+  actionId: string; idempotencyKey: string; userId: string; grantId?: string; clientId?: string; context: readonly ContextItem[];
 }
 export interface CapabilityAdapter {
+  /** Read-only authoritative preparation. Must never create provider orders. */
+  prepare?(args: Record<string,unknown>, principal: Principal): Promise<Record<string,unknown>>;
   execute(args: Record<string, unknown>, context: ProviderContext): Promise<ProviderResult>;
   requery?(args: Record<string, unknown>, context: ProviderContext): Promise<ProviderResult>;
   money?(args: Record<string, unknown>): MoneyRequirement;
@@ -89,6 +91,10 @@ export class CapabilityRegistry {
     rejectAuthorityControls(args);
     const e=this.entries.get(id);
     if(!e || !e.input(args)) throw new AxisError("invalid_arguments");
+  }
+  async prepare(id:string,args:Record<string,unknown>,principal:Principal):Promise<Record<string,unknown>> {
+    const e=this.entries.get(id);if(!e)throw new AxisError("capability_unavailable");
+    return e.adapter.prepare?e.adapter.prepare(args,principal):args;
   }
   requirements(id: string, args: Record<string,unknown>): { context: string[]; resources: string[]; money?: MoneyRequirement } {
     const e=this.entries.get(id); if(!e) throw new AxisError("capability_unavailable");

@@ -11,7 +11,7 @@ export const authoritySchema = z.object({
   capabilities: names,
   contextTypes: names,
   resources: names,
-  financial: z.object({ asset: z.string(), perActionMinor: z.string().regex(/^\d+$/), totalMinor: z.string().regex(/^\d+$/) }).strict().nullable(),
+  financial: z.object({ asset: z.string(), perActionMinor: z.string().regex(/^\d+$/), totalMinor: z.string().regex(/^\d+$/), allowedAssets: names.optional(), allowedCurrencies: names.optional(), allowedDestinations: names.optional() }).strict().nullable(),
   requireApproval: z.boolean(),
   modes: z.array(z.enum(["LIVE", "SANDBOX", "MOCK", "HANDOFF", "UPSTREAM_MCP"])),
 }).strict();

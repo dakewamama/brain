@@ -9,6 +9,8 @@ export function authorizeExecution(p: Principal, d: CapabilityDescriptor, contex
   if(!requiredContext.every(t=>context.some(c=>c.type===t && Date.parse(c.expiresAt)>Date.now()))) throw new AxisError("context_unavailable");
   if(d.risk==="financial" || money) {
     const limit=p.authority.financial;
+    if(money?.currency && (!limit?.allowedCurrencies?.includes(money.currency) || !limit.allowedAssets?.includes(money.tokenAsset??money.asset))) throw new AxisError("financial_asset_not_allowed");
+    if(money?.destination && limit?.allowedDestinations && !limit.allowedDestinations.includes(money.destination)) throw new AxisError("financial_destination_not_allowed");
     if(!money || !/^\d+$/.test(money.amountMinor) || BigInt(money.amountMinor)<=0n || !limit || limit.asset!==money.asset || BigInt(money.amountMinor)>BigInt(limit.perActionMinor)) throw new AxisError("financial_limit");
   }
 }
