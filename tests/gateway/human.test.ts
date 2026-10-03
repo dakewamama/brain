@@ -49,7 +49,8 @@ else{
   }finally{await lock.query("ROLLBACK");lock.release();await pending;}
  });
  test("operator expiry is checked after waiting for its authority lock",async()=>{
-  const expires=new Date(Date.now()+2000),op=await human.issueOperator(userId,expires);
+  const op=await human.issueOperator(userId,new Date(Date.now()+60000));
+  await pool.query("UPDATE human_operators SET expires_at=clock_timestamp()+interval '2 seconds' WHERE id=$1",[op.id]);
   const lock=await pool.connect(),mutation=await pool.connect();let pending:Promise<unknown>|undefined;
   try{
    await lock.query("BEGIN");await mutation.query("BEGIN");
@@ -62,7 +63,11 @@ else{
     if(blocked)break;await new Promise(r=>setTimeout(r,10));
    }
    assert.equal(blocked,true);
-   await new Promise(r=>setTimeout(r,Math.max(0,expires.getTime()-Date.now()+100)));
+   const deadline=performance.now()+10000;
+   while(!(await pool.query("SELECT expires_at<=clock_timestamp() expired FROM human_operators WHERE id=$1",[op.id])).rows[0].expired){
+    if(performance.now()>deadline)throw new Error("database expiry deadline not reached");
+    await new Promise(r=>setTimeout(r,10));
+   }
    await lock.query("COMMIT");assert.match(String(await pending),/unauthorized_operator/);
   }finally{await lock.query("ROLLBACK");await pending;await mutation.query("ROLLBACK");lock.release();mutation.release();}
  });
