@@ -1,12 +1,19 @@
 import {digest} from "../core/digest.js";
 import {createHash,randomBytes,randomUUID} from "node:crypto";
-import type {Pool} from "pg";
+import type {Pool,PoolClient} from "pg";
 import {z} from "zod";
 import {AxisError} from "../grants/service.js";
 import {PgCaseStore} from "../cases/store.js";
 import {CapabilityRegistry,type ProviderContext,type ProviderResult} from "../capabilities/registry.js";
 const hash=(s:string)=>createHash("sha256").update(s).digest("hex");
 export const humanResponse=z.object({decision:z.enum(["confirm","reject"]),evidence:z.object({reference:z.string().min(1).max(1000),description:z.string().min(1).max(2000)}).strict()}).strict();
+/** Serialize an operator mutation with revocation; call after other blocking work. */
+export async function lockOperatorAuthority(db:PoolClient,token:string):Promise<void>{
+ // Acquire the lock before checking the clock: the lock wait itself may outlast expiry.
+ await db.query("SELECT id FROM human_operators WHERE token_hash=$1 FOR SHARE",[hash(token)]);
+ const r=await db.query("SELECT id FROM human_operators WHERE token_hash=$1 AND expires_at>clock_timestamp() AND NOT revoked",[hash(token)]);
+ if(!r.rowCount)throw new AxisError("unauthorized_operator");
+}
 export class HumanTaskService {
  private store:PgCaseStore;
  constructor(private pool:Pool){this.store=new PgCaseStore(pool);}
@@ -28,6 +35,7 @@ export class HumanTaskService {
     if(t.status==="RESOLVED"){if(digest(t.response)!==digest(response))throw new AxisError("resolution_conflict");await db.query("COMMIT");return;}
     if(!["REQUESTED","ASSIGNED"].includes(t.status)||new Date(t.deadline)<=new Date())throw new AxisError("human_task_inactive");
     const c=await db.query("SELECT status FROM cases WHERE id=$1 FOR UPDATE",[t.case_id]);if(c.rows[0]?.status!=="waiting_human")throw new AxisError("human_task_inactive");
+    await lockOperatorAuthority(db,token);
     await db.query("UPDATE human_tasks SET status='RESOLVED',assigned_operator=$2,response=$3,resolved_at=now() WHERE id=$1",[id,fresh.id,response]);
     await db.query("INSERT INTO human_audit(task_id,operator_id,operation,payload) VALUES ($1,$2,'resolved',$3)",[id,fresh.id,response]);
     await db.query("INSERT INTO evidence(id,case_id,action_id,kind,payload) VALUES ($1,$2,$3,'authenticated_participant_reply',$4)",[randomUUID(),t.case_id,t.action_id,{humanTaskId:id,operatorId:fresh.id,response}]);

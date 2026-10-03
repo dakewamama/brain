@@ -78,4 +78,27 @@ else{
   await assert.rejects(new ExperienceService(pool,changed).plan(p,"document_update_review_v1",{}),/procedure_requires_discovery/);
  });
 
+ test("revocation during a blocked promotion leaves the stage and audit unchanged",async()=>{
+  const book=(await pool.query("SELECT id FROM experience_playbooks WHERE user_id=$1",[userId])).rows[0];
+  // Seed the last pre-promotion stage from this test's verified successful runs.
+  await pool.query("UPDATE experience_playbooks SET stage='COMPILED_CANDIDATE' WHERE id=$1",[book.id]);
+  const count=(await pool.query("SELECT count(*)::int n FROM experience_promotions WHERE playbook_id=$1",[book.id])).rows[0].n;
+  const op=await human.issueOperator(userId,new Date(Date.now()+60000)),lock=await pool.connect();let pending:Promise<unknown>|undefined;
+  try{
+   await lock.query("BEGIN");const pid=(await lock.query("SELECT pg_backend_pid() pid")).rows[0].pid;
+   await lock.query("SELECT id FROM experience_playbooks WHERE id=$1 FOR UPDATE",[book.id]);
+   pending=gateway.experience.promote(op.token,book.id,"COMPILED").then(()=>null,e=>e);
+   let blocked=false;
+   for(let i=0;i<100;i++){
+    blocked=(await pool.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))) blocked",[pid])).rows[0].blocked;
+    if(blocked)break;await new Promise(r=>setTimeout(r,10));
+   }
+   assert.equal(blocked,true);
+   await pool.query("UPDATE human_operators SET revoked=true WHERE id=$1",[op.id]);await lock.query("COMMIT");
+   assert.match(String(await pending),/unauthorized_operator/);
+   assert.equal((await pool.query("SELECT stage FROM experience_playbooks WHERE id=$1",[book.id])).rows[0].stage,"COMPILED_CANDIDATE");
+   assert.equal((await pool.query("SELECT count(*)::int n FROM experience_promotions WHERE playbook_id=$1",[book.id])).rows[0].n,count);
+  }finally{await lock.query("ROLLBACK");lock.release();await pending;}
+ });
+
 }

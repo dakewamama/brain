@@ -1,3 +1,4 @@
+import {lockOperatorAuthority} from "../human/service.js";
 import {createHash,randomUUID} from "node:crypto";
 import type {Pool} from "pg";
 import {z} from "zod";
@@ -66,6 +67,7 @@ export class ExperienceService {
    for(const run of runs.rows)if((await this.store.getCase(run.case_id))?.status==="completed"&&await hasCurrentProof(this.store,run.case_id))verified++;
    const needed=to==="VERIFIED"?1:to==="PROVEN"?2:3;if(verified<needed)throw new AxisError("insufficient_verified_runs");
    for(const step of p.structure as Step[]){const d=this.registry.get(step.capabilityId);if(!d||digest({input:d.inputSchema,output:d.outputSchema,version:d.version,provider:d.provider,mode:d.mode})!==step.schemaDigest||!step.postcondition)throw new AxisError("incompatible_procedure");}
+   await lockOperatorAuthority(db,token);
    await db.query("UPDATE experience_playbooks SET stage=$2 WHERE id=$1",[id,to]);await db.query("INSERT INTO experience_promotions(playbook_id,operator_id,from_stage,to_stage,verified_runs) VALUES ($1,$2,$3,$4,$5)",[id,op.rows[0].id,p.stage,to,verified]);await db.query("COMMIT");
   }catch(error){await db.query("ROLLBACK");throw error;}finally{db.release();}
  }

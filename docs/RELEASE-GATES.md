@@ -14,6 +14,11 @@ unmerged until reviewed. Channel development and workflow migration remain defer
   second-run procedure reuse. Composio responses are controlled contract fixtures.
 - PAJ lost-response, duplicate webhook, signed completion and ambiguous financial
   outcomes through fault-injection tests. These are not authenticated PAJ results.
+- Human resolution and Experience promotion recheck operator authority inside
+  their mutation transaction, after blocking work. Row locks serialize revocation;
+  expiry is checked after acquiring the authority lock. Real PostgreSQL tests
+  cover revocation during task/promotion lock waits and expiry during authority
+  lock waits; rejected mutations leave task/stage/audit state unchanged.
 - Authenticated PAJ/Composio requests reject redirects. JSON reads are bounded to
   256 KiB before parsing, including chunked responses. Invalid/oversized write
   responses retain existing ambiguous-outcome handling; no provider replay is added.
@@ -85,7 +90,7 @@ npm audit --omit=dev
 Browser tests require the pinned Playwright Chromium installation and its native
 libraries. They must run with an actual browser and PostgreSQL; a passing report
 with skipped integration tests is not release evidence. The full local suite at
-this checkpoint passed 167 tests with zero failures/skips.
+this checkpoint passed 170 tests with zero failures/skips.
 
 Live deployment, authenticated provider execution, funded settlement, backup
 restore on the target host, and external security review remain unclaimed.
