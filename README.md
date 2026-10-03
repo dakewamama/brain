@@ -33,7 +33,7 @@ is production-ready.
 - Durable `WAITING_HUMAN` tasks, audited operator resolution and restart-safe resume.
 - Private parameterized Experience, operator-promoted Playbooks and compiled sequences.
 
-Validation: 172 tests passed against real PostgreSQL, with no skips. The external
+Validation: 173 tests passed against real PostgreSQL, with no skips. The external
 MCP acceptance flow used a Composio contract fixture and real sandbox Chromium.
 Its second run reused a Playbook: discovery searches fell from 1 to 0, with four
 Actions in both runs. Neither run called an LLM. Live Composio credentials remain
@@ -41,6 +41,8 @@ unvalidated. See the [captured metrics](docs/EXPERIENCE-ACCEPTANCE.json).
 
 Current productionization evidence and remaining access-dependent checks are in
 [release gates](docs/RELEASE-GATES.md).
+
+Deployment package and the existing Railway service runbook: [deploy MCP](docs/DEPLOY-MCP.md).
 
 ## Run
 

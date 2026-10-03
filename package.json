@@ -14,7 +14,9 @@
     "eval:planner": "tsx src/eval/run.ts",
     "admin": "tsx src/mcp/admin.ts",
     "test:postgres": "node scripts/test-postgres.mjs",
-    "legacy:dev": "tsx watch src/index.ts"
+    "legacy:dev": "tsx watch src/index.ts",
+    "admin:production": "node dist/mcp/admin.js",
+    "smoke:mcp": "node scripts/mcp-smoke.mjs"
   },
   "keywords": [
     "whatsapp",

@@ -9,6 +9,9 @@ unmerged until reviewed. Channel development and workflow migration remain defer
 - Strict TypeScript build and packaged migrations.
 - Real PostgreSQL Case persistence, concurrent Actions, deduplication, process
   restart, immutable preparations, Grant/Context enforcement and Proof.
+- Production-only runtime package validated behind certificate-verified local HTTPS:
+  platform health Host accepted, MCP foreign Host/origin rejected, persisted Grant,
+  native LIVE read, Proof and stable work identity across service restart.
 - External MCP client invocation and approved upstream filesystem integration.
 - Real Chromium sandbox execution, durable human resolution and verified
   second-run procedure reuse. Composio responses are controlled contract fixtures.
@@ -47,11 +50,12 @@ unmerged until reviewed. Channel development and workflow migration remain defer
 | Target deployment | Intended host/project, database and secret injection mechanism | TLS/origin authentication, migrations, external MCP smoke, SIGTERM drain and restart recovery on that host |
 | Operational recovery | Target database backup configuration and restore environment | Restore a backup into an isolated database; confirm stable Actions and no automatic resubmission of ambiguous writes |
 
-No PAJ, Composio, Browserbase or target-database credentials were configured in
-this process or Brain/Onboarding environment files during this pass. Do not copy
-secrets into this document or Git. Supply their existing location through the
-operator's secret store. Do not choose arbitrary production recipients or amounts
-to manufacture a payment acceptance result.
+Railway CLI access is configured: the existing `axis` project has Brain,
+Onboarding and Postgres, and Brain already has DATABASE_URL and a public domain.
+The user confirmed billing is the deployment blocker. No cloud settings were
+changed. PAJ/Composio live-contract checks remain deferred. Never copy credentials
+into this document or Git, or choose arbitrary production recipients/amounts.
+See `docs/DEPLOY-MCP.md` for the finished core deployment package and runbook.
 
 ## Operator validation sequence
 
@@ -94,7 +98,7 @@ npm audit --omit=dev
 Browser tests require the pinned Playwright Chromium installation and its native
 libraries. They must run with an actual browser and PostgreSQL; a passing report
 with skipped integration tests is not release evidence. The full local suite at
-this checkpoint passed 172 tests with zero failures/skips.
+this checkpoint passed 173 tests with zero failures/skips.
 
 Live deployment, authenticated provider execution, funded settlement, backup
 restore on the target host, and external security review remain unclaimed.
