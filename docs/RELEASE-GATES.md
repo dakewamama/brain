@@ -14,6 +14,10 @@ unmerged until reviewed. Channel development and workflow migration remain defer
   second-run procedure reuse. Composio responses are controlled contract fixtures.
 - PAJ lost-response, duplicate webhook, signed completion and ambiguous financial
   outcomes through fault-injection tests. These are not authenticated PAJ results.
+- Multi-step SIGKILL recovery checks required evidence for every preceding Action
+  before dispatching the next one. A persisted but unproven success stays VERIFYING
+  without subsequent effects or Experience capture. A proven sequence resumes in
+  a fresh process without replaying its first Action.
 - Human resolution and Experience promotion recheck operator authority inside
   their mutation transaction, after blocking work. Row locks serialize revocation;
   expiry is checked after acquiring the authority lock. Real PostgreSQL tests
@@ -90,7 +94,7 @@ npm audit --omit=dev
 Browser tests require the pinned Playwright Chromium installation and its native
 libraries. They must run with an actual browser and PostgreSQL; a passing report
 with skipped integration tests is not release evidence. The full local suite at
-this checkpoint passed 170 tests with zero failures/skips.
+this checkpoint passed 172 tests with zero failures/skips.
 
 Live deployment, authenticated provider execution, funded settlement, backup
 restore on the target host, and external security review remain unclaimed.

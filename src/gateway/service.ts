@@ -8,7 +8,7 @@ import type { Transition } from "../cases/types.js";
 import { CapabilityRegistry, permitted, authorized, rejectAuthorityControls, type Dispatch, type CapabilityDescriptor, type Invocation, type MoneyRequirement, type ProviderResult } from "../capabilities/registry.js";
 import { GrantService, AxisError, type Principal } from "../grants/service.js";
 import { ContextService } from "../context/service.js";
-import { hasCurrentProof } from "../proof/gate.js";
+import { hasCurrentProof,hasRequiredActionEvidence } from "../proof/gate.js";
 import { authorizeExecution } from "../policy/execution.js";
 
 const argsSchema=z.record(z.unknown());
@@ -26,8 +26,8 @@ interface Proposal {
   successCriteria:string[];contextIds:string[];contextClasses?:string[];money?:MoneyRequirement;experience?:ExperiencePlan;
 }
 interface Preparation {id:string;case_id:string;grant_id:string;client_id:string;user_id:string;digest:string;request_digest:string;proposal:Proposal;expires_at:Date}
-/** Business boundary shared by MCP and future clients. One bounded action per
- * preparation in V1; no LLM planner, queue engine, or provider credentials here. */
+/** Business boundary shared by MCP and future clients. Preparations hold one
+ * Action or a bounded non-financial sequence; provider credentials stay in adapters. */
 export class AxisGateway {
   readonly store:PgCaseStore;
   readonly runner:CaseRunner;
@@ -237,6 +237,11 @@ export class AxisGateway {
     const allActions=(await this.store.listActions(workId)).sort((a,b)=>Number(a.input.sequence??0)-Number(b.input.sequence??0));
     const action=allActions.find(a=>a.status!=="settled")??allActions.at(-1);const index=Number(action?.input.sequence??0);
     if(!prep||!action) return {fail:{reason:"missing durable action"}};
+    // A crash can occur after storing success but before its proof check/transition.
+    // Never infer a safe prefix merely from settled Action status.
+    for(const prior of allActions.slice(0,index)){
+      if(!await hasRequiredActionEvidence(this.store,workId,prior))return {complete:{summary:prep.proposal.understoodGoal}};
+    }
     if(action.status==="settled") return {complete:{summary:prep.proposal.understoodGoal}};
     const started=(await this.store.attemptsFor(action.id)).length>0;
     let p:Principal;let validated:Awaited<ReturnType<AxisGateway["validatePreparation"]>>;
