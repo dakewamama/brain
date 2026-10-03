@@ -1,3 +1,4 @@
+import { providerJson } from "../../core/provider-response.js";
 import { z } from "zod";
 import { AxisError } from "../../grants/service.js";
 
@@ -9,10 +10,10 @@ export class PajClient {
  constructor(readonly config:PajConfig,private transport:typeof fetch=fetch){}
  async request(method:"GET"|"POST",path:string,body?:Record<string,unknown>):Promise<unknown>{
   const origin=this.config.environment==="production"?"https://api.paj.cash":"https://api-staging.paj.cash";
-  const r=await this.transport(origin+path,{method,headers:{"x-api-key":this.config.apiKey,"content-type":"application/json"},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
+  const r=await this.transport(origin+path,{method,headers:{"x-api-key":this.config.apiKey,"content-type":"application/json"},body:body?JSON.stringify(body):undefined,redirect:"error",signal:AbortSignal.timeout(15000)});
   // Never leak the API key or provider error bodies into client responses.
   if(!r.ok)throw new AxisError(`paj_http_${r.status}`);
-  return r.json();
+  return providerJson(r);
  }
  async rates(currency:string){
   const rates=ratesSchema.parse(await this.request("GET",`/pub/v2/rate?currency=${encodeURIComponent(currency)}`));

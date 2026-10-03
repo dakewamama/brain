@@ -1,3 +1,4 @@
+import { providerJson } from "../core/provider-response.js";
 import { z } from "zod";
 import { digest } from "../core/digest.js";
 import { AxisError } from "../grants/service.js";
@@ -14,8 +15,8 @@ export class ComposioSource implements ExternalCapabilitySource {
  readonly id="composio";
  constructor(private apiKey:string,private transport:typeof fetch=fetch){}
  private async request(path:string,body?:Record<string,unknown>){
-  const r=await this.transport(`https://backend.composio.dev/api/v3.1${path}`,{method:body?"POST":"GET",headers:{"x-api-key":this.apiKey,"content-type":"application/json"},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
-  if(!r.ok)throw new AxisError("catalog_unavailable");return r.json() as Promise<unknown>;
+  const r=await this.transport(`https://backend.composio.dev/api/v3.1${path}`,{method:body?"POST":"GET",headers:{"x-api-key":this.apiKey,"content-type":"application/json"},body:body?JSON.stringify(body):undefined,redirect:"error",signal:AbortSignal.timeout(15000)});
+  if(!r.ok)throw new AxisError("catalog_unavailable");return providerJson(r);
  }
  async discover(toolId:string):Promise<ExternalTool>{
   const t=z.object({slug:z.string(),description:z.string(),input_parameters:z.record(z.unknown()),output_parameters:z.record(z.unknown()).optional(),version:z.string()}).parse(await this.request(`/tools/${encodeURIComponent(toolId)}?toolkit_versions=latest`));
