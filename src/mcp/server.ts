@@ -44,7 +44,17 @@ export function createMcpApp(gateway:AxisGateway,options:{host?:string;publicOri
     catch {if(!res.headersSent) res.status(500).json({jsonrpc:"2.0",id:null,error:{code:-32603,message:"Internal error"}});}
   });
   app.get("/mcp",(_req,res)=>{res.status(405).end();});app.delete("/mcp",(_req,res)=>{res.status(405).end();});
-  app.get("/health",(_req,res)=>{res.json({service:"axis-mcp",status:"ready"});});
+  app.get("/health",async(_req,res)=>{
+    res.setHeader("Cache-Control","no-store");
+    try {
+      // pg supports per-query timeout; its QueryConfig typings omit this field.
+      const probe={text:"SELECT 1",query_timeout:2000};
+      await gateway.pool.query(probe);
+      res.json({service:"axis-mcp",status:"ready"});
+    } catch {
+      res.status(503).json({service:"axis-mcp",status:"unavailable"});
+    }
+  });
   const errors:ErrorRequestHandler=(_error,_req,res,_next)=>{res.status(400).json({error:"invalid_request"});};app.use(errors);
   return app;
 }

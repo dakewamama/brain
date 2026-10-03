@@ -42,6 +42,18 @@ else {
  after(async()=>{await upstream?.close();await stdio?.close();reference?.kill();if(server)await new Promise<void>(r=>server.close(()=>r()));await pool.end();await closePool();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();});
  async function client(){const c=new Client({name:"external-test",version:"1"});await c.connect(new StreamableHTTPClientTransport(new URL(endpoint),{requestInit:{headers:{authorization:`Bearer ${token}`}}}));return c;}
  async function call(c:Client,name:string,args:Record<string,unknown>){const result=await c.callTool({name,arguments:args});assert.ok(!result.isError,JSON.stringify(result));return (result.structuredContent as {result:Record<string,unknown>}).result;}
+ test("readiness fails closed when durable storage is unavailable",async()=>{
+  const healthPool=new Pool({connectionString:isolated.toString(),connectionTimeoutMillis:1000});
+  const healthServer=createMcpApp(new AxisGateway(healthPool,new CapabilityRegistry())).listen(0,"127.0.0.1");
+  await new Promise<void>(resolve=>healthServer.once("listening",resolve));
+  const healthUrl=`http://127.0.0.1:${(healthServer.address() as {port:number}).port}/health`;
+  try{
+   const healthy=await fetch(healthUrl);assert.equal(healthy.status,200);assert.equal(healthy.headers.get("cache-control"),"no-store");
+   await healthPool.end();
+   const unavailable=await fetch(healthUrl);assert.equal(unavailable.status,503);
+   assert.deepEqual(await unavailable.json(),{service:"axis-mcp",status:"unavailable"});
+  }finally{await new Promise<void>(resolve=>healthServer.close(()=>resolve()));if(!healthPool.ended)await healthPool.end();}
+ });
  test("external SDK client authenticates, searches, prepares, executes, sees durable proof and scoped context",async()=>{
   const c=await client();try {
    assert.deepEqual((await c.listTools()).tools.map(t=>t.name).sort(),["axis.prepare","axis.execute","axis.status","axis.cancel","axis.capabilities.search","axis.capabilities.invoke"].sort());
