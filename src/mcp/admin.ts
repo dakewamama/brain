@@ -1,3 +1,7 @@
+import {configuredCapabilities} from "./capabilities.js";
+import {ExperienceService} from "../experience/service.js";
+import {HumanTaskService} from "../human/service.js";
+import {PlaywrightBrowserProvider} from "../browser/provider.js";
 /** Local trusted operator interface. No administration or approval tools are exposed through MCP. */
 import { readFileSync } from "node:fs";
 import { getPool,migrate,closePool } from "../db/pool.js";
@@ -22,6 +26,19 @@ async function main():Promise<void>{
   const r=await pool.query(`INSERT INTO preparation_approvals(preparation_id,user_id,digest)
    SELECT id,user_id,digest FROM preparations WHERE id=$1 AND user_id=$2 AND digest=$3 AND expires_at>now() ON CONFLICT DO NOTHING RETURNING preparation_id`,[input.preparationId,input.userId,input.digest]);
   if(!r.rowCount)throw new Error("approval not recorded: check user, digest, expiry or existing approval");
+ }else if(command==="operator-issue"){
+  const i=z.object({userId:z.string(),expiresAt:z.string().datetime()}).strict().parse(raw);console.log(JSON.stringify(await new HumanTaskService(pool).issueOperator(i.userId,new Date(i.expiresAt))));
+ }else if(command==="human-read"||command==="human-resolve"){
+  const i=z.object({taskId:z.string(),response:z.unknown().optional()}).strict().parse(raw);const token=process.env.AXIS_OPERATOR_TOKEN;if(!token)throw new Error("AXIS_OPERATOR_TOKEN required");const service=new HumanTaskService(pool);
+  if(command==="human-read")console.log(JSON.stringify(await service.read(token,i.taskId)));else await service.resolve(token,i.taskId,i.response);
+ }else if(command==="browser-session"){
+  const i=z.object({userId:z.string(),origin:z.string().url(),paths:z.array(z.string()),selectors:z.array(z.string()),mode:z.enum(["LIVE","SANDBOX"]),expiresAt:z.string().datetime()}).strict().parse(raw);
+  if(!process.env.AXIS_BROWSER_PROFILE_DIR)throw new Error("AXIS_BROWSER_PROFILE_DIR required");console.log(await new PlaywrightBrowserProvider(pool,process.env.AXIS_BROWSER_PROFILE_DIR).createSession({...i,expiresAt:new Date(i.expiresAt)}));
+ }else if(command==="experience-list"||command==="experience-promote"){
+  const token=process.env.AXIS_OPERATOR_TOKEN;if(!token)throw new Error("AXIS_OPERATOR_TOKEN required");
+  const {registry}=await configuredCapabilities(pool);const service=new ExperienceService(pool,registry);
+  if(command==="experience-list")console.log(JSON.stringify(await service.list(token)));
+  else {const i=z.object({playbookId:z.string(),stage:z.enum(["VERIFIED","PROVEN","COMPILED_CANDIDATE","COMPILED"])}).strict().parse(raw);await service.promote(token,i.playbookId,i.stage);}
  }else throw new Error("unknown operator command");
 }
 main().catch(error=>{console.error(error instanceof Error?error.message:"operator command failed");process.exitCode=1;}).finally(closePool);

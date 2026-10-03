@@ -40,15 +40,39 @@ else {
   server=createMcpApp(gateway).listen(0,"127.0.0.1");await new Promise<void>(r=>server.once("listening",r));endpoint=`http://127.0.0.1:${(server.address() as {port:number}).port}/mcp`;
  });
  after(async()=>{await upstream?.close();await stdio?.close();reference?.kill();if(server)await new Promise<void>(r=>server.close(()=>r()));await pool.end();await closePool();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();});
+ // Queue wake times use the database clock; one immediate sweep need not see
+ // a newly queued Action as due. Wait for dispatch without weakening its verdict.
+ async function tick(){
+  const deadline=performance.now()+5000;
+  for(;;){
+   await worker.tick();
+   const pending=await pool.query("SELECT 1 FROM cases c JOIN actions a ON a.case_id=c.id WHERE c.status='waiting_timeout' AND a.status='authorized' LIMIT 1");
+   if(!pending.rowCount)return;
+   if(performance.now()>deadline)throw new Error("queued Action did not dispatch");
+   await new Promise(r=>setTimeout(r,10));
+  }
+ }
  async function client(){const c=new Client({name:"external-test",version:"1"});await c.connect(new StreamableHTTPClientTransport(new URL(endpoint),{requestInit:{headers:{authorization:`Bearer ${token}`}}}));return c;}
  async function call(c:Client,name:string,args:Record<string,unknown>){const result=await c.callTool({name,arguments:args});assert.ok(!result.isError,JSON.stringify(result));return (result.structuredContent as {result:Record<string,unknown>}).result;}
+ test("readiness fails closed when durable storage is unavailable",async()=>{
+  const healthPool=new Pool({connectionString:isolated.toString(),connectionTimeoutMillis:1000});
+  const healthServer=createMcpApp(new AxisGateway(healthPool,new CapabilityRegistry())).listen(0,"127.0.0.1");
+  await new Promise<void>(resolve=>healthServer.once("listening",resolve));
+  const healthUrl=`http://127.0.0.1:${(healthServer.address() as {port:number}).port}/health`;
+  try{
+   const healthy=await fetch(healthUrl);assert.equal(healthy.status,200);assert.equal(healthy.headers.get("cache-control"),"no-store");
+   await healthPool.end();
+   const unavailable=await fetch(healthUrl);assert.equal(unavailable.status,503);
+   assert.deepEqual(await unavailable.json(),{service:"axis-mcp",status:"unavailable"});
+  }finally{await new Promise<void>(resolve=>healthServer.close(()=>resolve()));if(!healthPool.ended)await healthPool.end();}
+ });
  test("external SDK client authenticates, searches, prepares, executes, sees durable proof and scoped context",async()=>{
   const c=await client();try {
    assert.deepEqual((await c.listTools()).tools.map(t=>t.name).sort(),["axis.prepare","axis.execute","axis.status","axis.cancel","axis.capabilities.search","axis.capabilities.invoke"].sort());
    const search=await call(c,"axis.capabilities.search",{});assert.ok(JSON.stringify(search).includes("location.context"));assert.ok(!JSON.stringify(search).includes("hidden"));
    const prepared=await call(c,"axis.prepare",{goal:"Where am I?",constraints:{capabilityId:"location.context",arguments:{precision:"coarse"}}});
    assert.equal(prepared.executionPossible,true);
-   await call(c,"axis.execute",{preparationId:prepared.preparationId});await worker.tick();
+   await call(c,"axis.execute",{preparationId:prepared.preparationId});await tick();
    const status=await call(c,"axis.status",{workId:prepared.workId});assert.equal(status.status,"COMPLETED");assert.equal(status.verification,"VERIFIED");assert.ok(!JSON.stringify(status.result).includes("latitude"));
    const exact=await call(c,"axis.prepare",{goal:"exact",constraints:{capabilityId:"location.context",arguments:{precision:"exact"}}});assert.equal(exact.executionPossible,false);
    const cancelled=await call(c,"axis.cancel",{workId:exact.workId});assert.equal(cancelled.result,"CANCELLED");
@@ -57,19 +81,19 @@ else {
  test("real SDK reference upstream follows discover-normalize-grant-invoke-evidence-proof",async()=>{
   const c=await client();try {
    const first=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.reference.greet",arguments:{name:"Axis"},idempotencyKey:"reference-greeting"});
-   await worker.tick();const result=await call(c,"axis.status",{workId:first.workId});assert.equal(result.status,"COMPLETED");assert.equal(result.mode,"UPSTREAM_MCP");assert.equal(result.providerMode,"SANDBOX");assert.match(JSON.stringify(result.result),/Axis/);
+   await tick();const result=await call(c,"axis.status",{workId:first.workId});assert.equal(result.status,"COMPLETED");assert.equal(result.mode,"UPSTREAM_MCP");assert.equal(result.providerMode,"SANDBOX");assert.match(JSON.stringify(result.result),/Axis/);
    const replay=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.reference.greet",arguments:{name:"Axis"},idempotencyKey:"reference-greeting"});assert.equal(replay.workId,first.workId);
    assert.equal((await gateway.store.listActions(String(first.workId))).length,1);
    assert.ok((await gateway.store.listEvidence(String(first.workId))).some(e=>e.kind==="verification"));
-   const stdioResult=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"via stdio"},idempotencyKey:"stdio"});await worker.tick();assert.equal((await call(c,"axis.status",{workId:stdioResult.workId})).status,"COMPLETED");
-   const slow=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.slow",arguments:{},idempotencyKey:"slow"});await worker.tick();assert.equal((await call(c,"axis.status",{workId:slow.workId})).status,"IN_DOUBT");assert.equal((await call(c,"axis.cancel",{workId:slow.workId})).result,"CANNOT_CANCEL");
+   const stdioResult=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"via stdio"},idempotencyKey:"stdio"});await tick();assert.equal((await call(c,"axis.status",{workId:stdioResult.workId})).status,"COMPLETED");
+   const slow=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.slow",arguments:{},idempotencyKey:"slow"});await tick();assert.equal((await call(c,"axis.status",{workId:slow.workId})).status,"IN_DOUBT");assert.equal((await call(c,"axis.cancel",{workId:slow.workId})).result,"CANNOT_CANCEL");
   }finally{await c.close();}
  });
  test("oversized output is rejected and changed upstream schema becomes unavailable",async()=>{
   const c=await client();try {
-   const large=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"__oversize__"},idempotencyKey:"large"});await worker.tick();assert.equal((await call(c,"axis.status",{workId:large.workId})).status,"FAILED");
-   const change=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"__change_schema__"},idempotencyKey:"change"});await worker.tick();assert.equal((await call(c,"axis.status",{workId:change.workId})).status,"COMPLETED");
-   const stale=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"old schema"},idempotencyKey:"drift"});await worker.tick();assert.equal((await call(c,"axis.status",{workId:stale.workId})).status,"FAILED");
+   const large=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"__oversize__"},idempotencyKey:"large"});await tick();assert.equal((await call(c,"axis.status",{workId:large.workId})).status,"FAILED");
+   const change=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"__change_schema__"},idempotencyKey:"change"});await tick();assert.equal((await call(c,"axis.status",{workId:change.workId})).status,"COMPLETED");
+   const stale=await call(c,"axis.capabilities.invoke",{capabilityId:"apps.fixture.read",arguments:{query:"old schema"},idempotencyKey:"drift"});await tick();assert.equal((await call(c,"axis.status",{workId:stale.workId})).status,"FAILED");
    assert.equal(registry.get("apps.fixture.read")?.health,"unhealthy");
    assert.ok(!JSON.stringify(await call(c,"axis.capabilities.search",{})).includes("apps.fixture.read"));
   }finally{await c.close();}

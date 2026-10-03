@@ -1,3 +1,4 @@
+import {ExperienceService,stepSchema,type ExperiencePlan} from "../experience/service.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Pool } from "pg";
@@ -7,11 +8,11 @@ import type { Transition } from "../cases/types.js";
 import { CapabilityRegistry, permitted, authorized, rejectAuthorityControls, type Dispatch, type CapabilityDescriptor, type Invocation, type MoneyRequirement, type ProviderResult } from "../capabilities/registry.js";
 import { GrantService, AxisError, type Principal } from "../grants/service.js";
 import { ContextService } from "../context/service.js";
-import { hasCurrentProof } from "../proof/gate.js";
+import { hasCurrentProof,hasRequiredActionEvidence } from "../proof/gate.js";
 import { authorizeExecution } from "../policy/execution.js";
 
 const argsSchema=z.record(z.unknown());
-export const prepareSchema=z.object({goal:z.string().min(1).max(2000),constraints:z.object({capabilityId:z.string().optional(),arguments:argsSchema.optional(),region:z.string().optional(),maxCost:z.object({asset:z.string(),amountMinor:z.string().regex(/^\d+$/)}).strict().optional()}).strict().optional()}).strict();
+export const prepareSchema=z.object({goal:z.string().min(1).max(2000),constraints:z.object({taskShape:z.string().optional(),parameters:z.record(z.unknown()).optional(),steps:z.array(stepSchema).min(2).max(8).optional(),capabilityId:z.string().optional(),arguments:argsSchema.optional(),region:z.string().optional(),maxCost:z.object({asset:z.string(),amountMinor:z.string().regex(/^\d+$/)}).strict().optional()}).strict().optional()}).strict();
 export const executeSchema=z.object({preparationId:z.string().min(1)}).strict();
 export const statusSchema=z.object({workId:z.string().min(1)}).strict();
 export const cancelSchema=z.object({workId:z.string().min(1)}).strict();
@@ -22,19 +23,21 @@ import { digest } from "../core/digest.js";
 interface Proposal {
   understoodGoal:string; constraints:z.infer<typeof prepareSchema>["constraints"]; actions:{capabilityId:string;version:string;arguments:Record<string,unknown>;descriptorDigest:string}[];
   requiredApprovals:string[];missingInformation:string[];knownCost:null;executionPossible:boolean;
-  successCriteria:string[];contextIds:string[];money?:MoneyRequirement;
+  successCriteria:string[];contextIds:string[];contextClasses?:string[];money?:MoneyRequirement;experience?:ExperiencePlan;
 }
 interface Preparation {id:string;case_id:string;grant_id:string;client_id:string;user_id:string;digest:string;request_digest:string;proposal:Proposal;expires_at:Date}
-/** Business boundary shared by MCP and future clients. One bounded action per
- * preparation in V1; no LLM planner, queue engine, or provider credentials here. */
+/** Business boundary shared by MCP and future clients. Preparations hold one
+ * Action or a bounded non-financial sequence; provider credentials stay in adapters. */
 export class AxisGateway {
   readonly store:PgCaseStore;
   readonly runner:CaseRunner;
   readonly grants:GrantService;
   readonly context:ContextService;
+  readonly experience:ExperienceService;
   private dispatch:Dispatch;
   constructor(readonly pool:Pool,readonly registry:CapabilityRegistry) {
     this.store=new PgCaseStore(pool);this.runner=new CaseRunner(this.store,"LIVE",registry);this.grants=new GrantService(pool);this.context=new ContextService(pool);
+    this.experience=new ExperienceService(pool,registry);this.runner.onCompleted=id=>this.experience.capture(id);
     this.dispatch=registry.bindExecution((p,i)=>this.invokeFor(p,i));
     this.runner.registerPlaybook({id:"gateway-v1",initialState:"execute",states:{execute:{onEnter:ctx=>this.runAction(ctx.caseId)}}});
     this.runner.registerReconciler("gateway-v1",async id=>{
@@ -47,7 +50,7 @@ export class AxisGateway {
     if(!r.rows[0]) throw new AxisError("not_found");return r.rows[0] as Preparation;
   }
   async searchCapabilities(token:string,raw:unknown):Promise<CapabilityDescriptor[]> {
-    const p=await this.grants.authenticate(token);const filters=searchSchema.parse(raw);
+    const p=await this.grants.authenticate(token);const filters=searchSchema.parse(raw);await this.registry.refresh(p);
     const context=await this.context.read(p,p.authority.contextTypes);
     return this.registry.search(p,filters,context.map(c=>c.type));
   }
@@ -65,27 +68,27 @@ export class AxisGateway {
         return this.preparedView(prior);
       }
     }
+    await this.registry.refresh(p);
     const context=await this.context.read(p,p.authority.contextTypes);
-    const explicit=input.constraints?.capabilityId;
-    const descriptor=explicit ? this.registry.get(explicit) : this.registry.search(p,{query:input.goal,region:input.constraints?.region,limit:1},context.map(c=>c.type))[0];
-    if(explicit && (!descriptor || !permitted(p,descriptor))) throw new AxisError("capability_unavailable");
-    let arguments_=input.constraints?.arguments??{};
-    const missing:string[]=[];
-    let needed:string[]=[];let money:MoneyRequirement|undefined;
-    if(!descriptor) missing.push("Select an authorized capability");
-    else {
-      try { this.registry.validate(descriptor.id,arguments_); const req=this.registry.requirements(descriptor.id,arguments_);needed=req.context;money=req.money;
-        if(!req.resources.every(r=>p.authority.resources.includes(r))) throw new AxisError("resource_not_allowed");
-        authorizeExecution(p,descriptor,context,needed,money,input.constraints?.region);
-        this.checkCost(input.constraints,money);
-        arguments_=await this.registry.prepare(descriptor.id,arguments_,p);
-        this.registry.validate(descriptor.id,arguments_);
-      } catch(error) { missing.push(error instanceof AxisError ? error.code : "invalid_arguments"); }
+    const experience=input.constraints?.taskShape?await this.experience.plan(p,input.constraints.taskShape,input.constraints.parameters??{},input.constraints.steps):undefined;
+    const selections=experience?experience.structure.map(step=>({descriptor:this.registry.get(step.capabilityId),arguments:this.experience.arguments(step,input.constraints?.parameters??{})})):[{descriptor:input.constraints?.capabilityId?this.registry.get(input.constraints.capabilityId):this.registry.search(p,{query:input.goal,region:input.constraints?.region,limit:1},context.map(c=>c.type))[0],arguments:input.constraints?.arguments??{}}];
+    const missing:string[]=[],needed=new Set<string>(),actions:Proposal["actions"]=[];let money:MoneyRequirement|undefined;
+    for(const selection of selections){
+      const descriptor=selection.descriptor;let arguments_=selection.arguments;
+      if(!descriptor||!permitted(p,descriptor)){if(input.constraints?.capabilityId||experience)throw new AxisError("capability_unavailable");missing.push("Select an authorized capability");continue;}
+      try{
+        this.registry.validate(descriptor.id,arguments_);const req=this.registry.requirements(descriptor.id,arguments_);req.context.forEach(t=>needed.add(t));money=req.money;
+        if(experience&&req.money)throw new AxisError("financial_sequence_not_supported");
+        if(!req.resources.every(r=>p.authority.resources.includes(r)))throw new AxisError("resource_not_allowed");
+        authorizeExecution(p,descriptor,context,req.context,money,input.constraints?.region);this.checkCost(input.constraints,money);
+        arguments_=await this.registry.prepare(descriptor.id,arguments_,p);this.registry.validate(descriptor.id,arguments_);
+      }catch(error){missing.push(error instanceof AxisError?error.code:"invalid_arguments");}
+      actions.push({capabilityId:descriptor.id,version:descriptor.version,arguments:arguments_,descriptorDigest:digest(descriptor)});
     }
-    const proposal:Proposal={understoodGoal:input.goal,constraints:input.constraints,actions:descriptor?[{capabilityId:descriptor.id,version:descriptor.version,arguments:arguments_,descriptorDigest:digest(descriptor)}]:[],
+    const proposal:Proposal={understoodGoal:input.goal,constraints:input.constraints,actions,
       requiredApprovals:p.authority.requireApproval?["user_confirmation"]:[],missingInformation:missing,knownCost:null,executionPossible:missing.length===0,
-      successCriteria:descriptor?[descriptor.risk==="read"?"validated provider response":"authoritative target state",...(descriptor.risk==="financial"?["settled internal money state"]:[])]:[],
-      contextIds:context.filter(c=>needed.includes(c.type)).map(c=>c.id),...(money?{money}:{})};
+      successCriteria:actions.map(a=>this.registry.get(a.capabilityId)?.risk==="read"?"validated provider response":"authoritative target state"),
+      contextIds:context.filter(c=>needed.has(c.type)).map(c=>c.id),contextClasses:[...needed],...(money?{money}:{}),...(experience?{experience}:{})};
     const id=randomUUID(),workId=randomUUID(),expires=new Date(Date.now()+300000),version=digest(proposal);
     const db=await this.pool.connect();
     try {
@@ -116,16 +119,17 @@ export class AxisGateway {
     if(!p.authority.requireApproval) return true;
     return !!(await this.pool.query("SELECT 1 FROM preparation_approvals WHERE preparation_id=$1 AND user_id=$2 AND digest=$3",[prep.id,p.userId,prep.digest])).rowCount;
   }
-  private async validatePreparation(prep:Preparation,p:Principal) {
+  private async validatePreparation(prep:Preparation,p:Principal,index=0) {
     const proposal=prep.proposal;
     if(digest(proposal)!==prep.digest || !proposal.executionPossible || new Date(prep.expires_at)<=new Date()) throw new AxisError("stale_preparation");
-    const action=proposal.actions[0];const descriptor=this.registry.get(action.capabilityId);
+    const action=proposal.actions[index];const descriptor=this.registry.get(action.capabilityId);
     if(!descriptor || digest(descriptor)!==action.descriptorDigest) throw new AxisError("stale_preparation");
     this.registry.validate(descriptor.id,action.arguments);
     const requirements=this.registry.requirements(descriptor.id,action.arguments);
     if(!requirements.resources.every(r=>p.authority.resources.includes(r))) throw new AxisError("resource_not_allowed");
-    const context=await this.context.read(p,requirements.context,prep.case_id);
-    if(proposal.contextIds.some(id=>!context.some(c=>c.id===id))) throw new AxisError("stale_context");
+    const allContext=await this.context.read(p,p.authority.contextTypes,prep.case_id);
+    const context=allContext.filter(c=>requirements.context.includes(c.type));
+    if(proposal.contextIds.some(id=>!allContext.some(c=>c.id===id))) throw new AxisError("stale_context");
     authorizeExecution(p,descriptor,context,requirements.context,requirements.money,proposal.constraints?.region);
     this.checkCost(proposal.constraints,requirements.money);
     return {action,descriptor,requirements,context};
@@ -159,6 +163,11 @@ export class AxisGateway {
           await db.query("INSERT INTO action_money(action_id,grant_id,asset,amount_minor,state) VALUES ($1,$2,$3,$4,'RESERVED')",[id,p.grantId,money.asset,money.amountMinor]);
           await db.query("INSERT INTO reservations(id,action_id,owner,amount_minor,asset,status) VALUES ($1,$1,$2,$3,$4,'reserved')",[id,p.userId,money.amountMinor,money.asset]);
         }
+        for(let index=1;index<prep.proposal.actions.length;index++){
+          const v=await this.validatePreparation(prep,fresh,index);if(v.requirements.money)throw new AxisError("financial_sequence_not_supported");
+          const nextId=`action_${digest(`${prep.id}:${index}`)}`;
+          await db.query("INSERT INTO actions(id,case_id,capability,status,input,idempotency_key) VALUES ($1,$2,$3,'authorized',$4,$1)",[nextId,prep.case_id,v.descriptor.id,{arguments:v.action.arguments,verificationRisk:v.descriptor.risk,sequence:index}]);
+        }
         await db.query("UPDATE cases SET status='waiting_timeout',wake_at=now() WHERE id=$1",[prep.case_id]);
         await db.query("INSERT INTO case_events(case_id,seq,type,payload) SELECT $1,COALESCE(MAX(seq),0)+1,'queued',$2 FROM case_events WHERE case_id=$1",[prep.case_id,{preparationId:prep.id}]);
         await db.query("COMMIT");
@@ -180,20 +189,21 @@ export class AxisGateway {
   }
   private async statusFor(p:Principal,prep:Preparation):Promise<Record<string,unknown>> {
     const c=await this.store.getCase(prep.case_id);if(!c) throw new AxisError("not_found");
-    const descriptor=this.registry.get(prep.proposal.actions[0]?.capabilityId);
-    if(descriptor && !authorized(p,descriptor)) throw new AxisError("not_found");
-    const actions=await this.store.listActions(c.id);const action=actions[0];
+    const descriptors=prep.proposal.actions.map(a=>this.registry.get(a.capabilityId));
+    if(descriptors.some(d=>d&&!authorized(p,d)))throw new AxisError("not_found");
+    const actions=(await this.store.listActions(c.id)).sort((a,b)=>Number(a.input.sequence??0)-Number(b.input.sequence??0));
+    const action=actions.find(a=>a.status!=="settled")??actions.at(-1);const descriptor=this.registry.get(action?.capability??prep.proposal.actions[0]?.capabilityId);
     const evidence=await this.store.listEvidence(c.id);
     const money=action?(await this.pool.query("SELECT asset,amount_minor::text,state FROM action_money WHERE action_id=$1",[action.id])).rows[0]:null;
-    const mapping:Record<string,string>={prepared:"PREPARED",waiting_user:"WAITING_APPROVAL",waiting_timeout:action?.status==="authorized"?"QUEUED":"WAITING_EXTERNAL",running:"EXECUTING",in_doubt:"IN_DOUBT",verifying:"VERIFYING",completed:"COMPLETED",failed:"FAILED",cancelled:"CANCELLED"};
-    const requirements=descriptor?this.registry.requirements(descriptor.id,prep.proposal.actions[0].arguments).context:[];
+    const mapping:Record<string,string>={prepared:"PREPARED",waiting_human:"WAITING_HUMAN",waiting_user:"WAITING_APPROVAL",waiting_timeout:action?.status==="authorized"?"QUEUED":"WAITING_EXTERNAL",running:"EXECUTING",in_doubt:"IN_DOUBT",verifying:"VERIFYING",completed:"COMPLETED",failed:"FAILED",cancelled:"CANCELLED"};
+    const requirements=prep.proposal.actions.flatMap(a=>this.registry.requirements(a.capabilityId,a.arguments).context);
     const visible=requirements.every(t=>p.authority.contextTypes.includes(t)&&p.authority.scopes.includes(`context:${t}`));
     const resultData=action?.result?.data as Record<string,unknown>|undefined;
     const instructionsFresh=!resultData?.fundingInstructionsExpireAt || Date.parse(String(resultData.fundingInstructionsExpireAt))>Date.now();
-    return {workId:c.id,preparationId:prep.id,status:mapping[c.status],summary:c.goal,mode:descriptor?.mode??"UNAVAILABLE",providerMode:descriptor?.metadata?.executionMode??descriptor?.mode??"UNAVAILABLE",actionId:action?.id,
+    return {workId:c.id,preparationId:prep.id,status:mapping[c.status],summary:c.goal,mode:descriptor?.mode??"UNAVAILABLE",providerMode:descriptor?.metadata?.executionMode??descriptor?.mode??"UNAVAILABLE",actionId:action?.id,actions:actions.map(a=>({id:a.id,capabilityId:a.capability,status:a.status})),executionLevel:prep.proposal.experience?.level??"DISCOVERY",
       money:money??null,verification:await hasCurrentProof(this.store,c.id)?"VERIFIED":"UNVERIFIED",
       evidence:evidence.map(e=>({kind:e.kind,at:e.at.toISOString()})),
-      result:visible && instructionsFresh && (c.status==="completed" || action?.result?.outcome==="pending") ? action?.result?.data ?? null : null,
+      result:visible && instructionsFresh && (c.status==="waiting_human" || c.status==="completed" || action?.result?.outcome==="pending") ? action?.result?.data ?? null : null,
       nextRequiredAction:c.status==="waiting_user"?"User approval required":c.status==="in_doubt"?"Reconcile the original provider request":c.status==="verifying"?"Obtain authoritative evidence":null};
   }
   async cancel(token:string,raw:unknown):Promise<Record<string,unknown>> {
@@ -202,7 +212,7 @@ export class AxisGateway {
       await this.grants.resolve(p.grantId,p.clientId);
       const c=await this.store.getCase(prep.case_id);const actions=await this.store.listActions(prep.case_id);
       if(c?.status==="cancelled") return {workId:prep.case_id,result:"CANCELLED"};
-      if(c?.status==="completed" || actions.some(a=>!["proposed","authorized","rejected"].includes(a.status))) return {workId:prep.case_id,result:"CANNOT_CANCEL",nextRequiredAction:"Provider reconciliation or compensation is required; no external effect was undone"};
+      if(c?.status==="completed" || actions.some(a=>!["proposed","authorized","rejected"].includes(a.status) && !(c?.status==="waiting_human" && (a.capability==="human.request" || a.input.verificationRisk==="read")))) return {workId:prep.case_id,result:"CANNOT_CANCEL",nextRequiredAction:"Provider reconciliation or compensation is required; no external effect was undone"};
       const db=await this.pool.connect();
       try {
         await db.query("BEGIN");
@@ -210,6 +220,7 @@ export class AxisGateway {
         await db.query("UPDATE action_money SET state='RELEASED' WHERE action_id IN (SELECT id FROM actions WHERE case_id=$1)",[prep.case_id]);
         await db.query("UPDATE reservations SET status='released',updated_at=now() WHERE action_id IN (SELECT id FROM actions WHERE case_id=$1)",[prep.case_id]);
         await db.query("UPDATE actions SET status='released',updated_at=now() WHERE case_id=$1",[prep.case_id]);
+        await db.query("UPDATE human_tasks SET status='CANCELLED' WHERE case_id=$1 AND status IN ('REQUESTED','ASSIGNED')",[prep.case_id]);
         await db.query("UPDATE cases SET status='cancelled',wake_at=NULL,updated_at=now() WHERE id=$1",[prep.case_id]);
         await db.query("INSERT INTO case_events(case_id,seq,type,payload) SELECT $1,COALESCE(MAX(seq),0)+1,'case_cancelled',$2 FROM case_events WHERE case_id=$1",[prep.case_id,{reason:"authorized cancellation before dispatch"}]);
         await db.query("COMMIT");
@@ -223,15 +234,21 @@ export class AxisGateway {
   }
   private async runAction(workId:string):Promise<Transition> {
     const row=await this.pool.query("SELECT * FROM preparations WHERE case_id=$1",[workId]);const prep=row.rows[0] as Preparation;
-    const action=(await this.store.listActions(workId))[0];
+    const allActions=(await this.store.listActions(workId)).sort((a,b)=>Number(a.input.sequence??0)-Number(b.input.sequence??0));
+    const action=allActions.find(a=>a.status!=="settled")??allActions.at(-1);const index=Number(action?.input.sequence??0);
     if(!prep||!action) return {fail:{reason:"missing durable action"}};
+    // A crash can occur after storing success but before its proof check/transition.
+    // Never infer a safe prefix merely from settled Action status.
+    for(const prior of allActions.slice(0,index)){
+      if(!await hasRequiredActionEvidence(this.store,workId,prior))return {complete:{summary:prep.proposal.understoodGoal}};
+    }
     if(action.status==="settled") return {complete:{summary:prep.proposal.understoodGoal}};
     const started=(await this.store.attemptsFor(action.id)).length>0;
     let p:Principal;let validated:Awaited<ReturnType<AxisGateway["validatePreparation"]>>;
     try {
       p=await this.grants.resolve(prep.grant_id,prep.client_id);
       // An in-flight intent retains its immutable identity past preparation TTL.
-      validated=await this.validatePreparation(started?{...prep,expires_at:new Date(Date.now()+1000)}:prep,p);
+      validated=await this.validatePreparation((started||index>0)?{...prep,expires_at:new Date(Date.now()+1000)}:prep,p,index);
       if(!await this.approval(prep,p)) throw new AxisError("approval_required");
     } catch(error) {
       if(started) return {inDoubt:{reason:"Authority or context unavailable; operator reconciliation required"}};
@@ -244,22 +261,27 @@ export class AxisGateway {
     let result:ProviderResult;
     try {
       const latest=await this.grants.resolve(prep.grant_id,prep.client_id);
-      await this.validatePreparation(started?{...prep,expires_at:new Date(Date.now()+1000)}:prep,latest);
+      await this.validatePreparation((started||index>0)?{...prep,expires_at:new Date(Date.now()+1000)}:prep,latest,index);
       if(!await this.approval(prep,latest)) throw new AxisError("approval_required");
       if(validated.requirements.money) {
         const total=await this.pool.query("SELECT COALESCE(SUM(amount_minor),0)::text AS total FROM action_money WHERE grant_id=$1 AND state NOT IN ('RELEASED','REVERSED','REFUNDED')",[latest.grantId]);
         if(!latest.authority.financial || BigInt(total.rows[0].total)>BigInt(latest.authority.financial.totalMinor)) throw new AxisError("financial_limit");
       }
-      result=await this.dispatch(descriptor.id,prep.proposal.actions[0].arguments,{actionId:action.id,idempotencyKey:action.idempotencyKey,userId:p.userId,grantId:p.grantId,clientId:p.clientId,context},started); }
+      result=await this.dispatch(descriptor.id,prep.proposal.actions[index].arguments,{actionId:action.id,idempotencyKey:action.idempotencyKey,userId:p.userId,grantId:p.grantId,clientId:p.clientId,context},started); }
     catch { result={outcome:descriptor.risk==="read"?"failed":"unknown",data:{}}; }
     await this.store.appendAttempt({id:randomUUID(),actionId:action.id,provider:descriptor.provider.id,mode:descriptor.mode,request:{requery:started},outcome:result.outcome==="succeeded"?"ok":result.outcome==="failed"?"failed":"unknown",response:{...result},providerRef:result.providerRef});
     await this.store.addEvidence({id:randomUUID(),caseId:workId,actionId:action.id,kind:"provider_receipt",payload:{...result,provider:descriptor.provider.id,mode:descriptor.mode}});
+    if(result.outcome==="waiting_human") {
+      await this.store.updateActionStatus(action.id,"executing",{...result});
+      return {waitingHuman:{taskId:String(result.data.humanTaskId),deadline:new Date(String(result.data.deadline))}};
+    }
     if(result.outcome==="succeeded") {
       if(descriptor.risk==="financial" && (result.moneyState!=="SETTLED" || !result.providerRef || !result.targetState)) {
         await this.money(action.id,"IN_DOUBT");await this.store.updateActionStatus(action.id,"in_doubt");return {inDoubt:{reason:"Financial result lacks final proof"}};
       }
       await this.money(action.id,"SETTLED");await this.store.updateActionStatus(action.id,"settled",{...result});
-      return {complete:{summary:prep.proposal.understoodGoal}};
+      if(descriptor.risk!=="read"&&(!result.targetState||!result.providerRef))return {complete:{summary:prep.proposal.understoodGoal}};
+      return index<prep.proposal.actions.length-1?{to:"execute"}:{complete:{summary:prep.proposal.understoodGoal}};
     }
     if(result.outcome==="failed" && (descriptor.risk!=="financial" || ["RELEASED","REVERSED"].includes(result.moneyState??""))) {
       await this.money(action.id,result.moneyState==="REVERSED"?"REVERSED":"RELEASED");await this.store.updateActionStatus(action.id,"failed",{...result});

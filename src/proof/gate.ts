@@ -1,5 +1,6 @@
 import { digest } from "../core/digest.js";
 import { randomUUID } from "node:crypto";
+import type { ActionRecord } from "../cases/types.js";
 import type { CaseStore } from "../cases/store.js";
 import type { CapabilityRisk } from "../policy/execution.js";
 
@@ -7,29 +8,34 @@ import type { CapabilityRisk } from "../policy/execution.js";
  * state. Neither a playbook transition nor a provider's success boolean suffices. */
 export async function verifyCompletion(store: CaseStore, caseId: string, defaultRisk?: CapabilityRisk): Promise<boolean> {
   const actions=await store.listActions(caseId);
+  if(!actions.length) return false;
+  for(const action of actions)if(!await hasRequiredActionEvidence(store,caseId,action,defaultRisk))return false;
+  await store.addEvidence({id:randomUUID(),caseId,kind:"verification",payload:{verified:true,actionIds:actions.map(a=>a.id),rule:"action-evidence-money-v2",snapshot:await proofSnapshot(store,caseId)}});
+  return true;
+}
+
+/** Recheck a persisted Action before allowing a dependent Action after recovery. */
+export async function hasRequiredActionEvidence(store:CaseStore,caseId:string,action:ActionRecord,defaultRisk?:CapabilityRisk):Promise<boolean>{
+  if(action.caseId!==caseId)return false;
   const evidence=await store.listEvidence(caseId);
   const owner=(await store.getCase(caseId))?.userId;
-  if(!actions.length) return false;
-  for(const action of actions) {
-    const risk=action.input.verificationRisk ?? defaultRisk;
-    if(!risk || action.status !== "settled") return false;
-    const attempts=await store.attemptsFor(action.id);
-    const last=attempts.at(-1);
-    if(!last || last.outcome !== "ok" || ["HANDOFF","UNAVAILABLE"].includes(last.mode)) return false;
-    const receipt=evidence.find(e=>e.actionId===action.id && e.kind==="provider_receipt");
-    if(!receipt) return false;
-    if(risk==="financial") {
-      const money=await store.getReservationByAction(action.id);
-      const response=last.response ?? {};
-      if(money?.owner!==owner || money?.status!=="captured" || !(response.providerStatus==="delivered" || (response.moneyState==="SETTLED" && typeof response.targetState==="string"))) return false;
-      const expected=action.input.moneyRequirement as {amountMinor?:string;asset?:string}|undefined;
-      if(expected && (expected.amountMinor!==money.amountMinor.toString() || expected.asset!==money.asset)) return false;
-      if(action.input.verificationRisk && (response.moneyState!=="SETTLED" || !last.providerRef)) return false;
-    } else if(risk!=="read") {
-      if(typeof last.response?.targetState!=="string" || !last.providerRef) return false;
-    }
+  const risk=action.input.verificationRisk ?? defaultRisk;
+  if(!risk || action.status !== "settled") return false;
+  const attempts=await store.attemptsFor(action.id);
+  const last=attempts.at(-1);
+  if(!last || last.outcome !== "ok" || ["HANDOFF","UNAVAILABLE"].includes(last.mode)) return false;
+  const receipt=evidence.find(e=>e.actionId===action.id && e.kind==="provider_receipt");
+  if(!receipt) return false;
+  if(risk==="financial") {
+    const money=await store.getReservationByAction(action.id);
+    const response=last.response ?? {};
+    if(money?.owner!==owner || money?.status!=="captured" || !(response.providerStatus==="delivered" || (response.moneyState==="SETTLED" && typeof response.targetState==="string"))) return false;
+    const expected=action.input.moneyRequirement as {amountMinor?:string;asset?:string}|undefined;
+    if(expected && (expected.amountMinor!==money.amountMinor.toString() || expected.asset!==money.asset)) return false;
+    if(action.input.verificationRisk && (response.moneyState!=="SETTLED" || !last.providerRef)) return false;
+  } else if(risk!=="read") {
+    if(typeof last.response?.targetState!=="string" || !last.providerRef) return false;
   }
-  await store.addEvidence({id:randomUUID(),caseId,kind:"verification",payload:{verified:true,actionIds:actions.map(a=>a.id),rule:"action-evidence-money-v2",snapshot:await proofSnapshot(store,caseId)}});
   return true;
 }
 

@@ -80,6 +80,7 @@ export interface CapabilityExecutor {
 const MAX_HOPS = 20;
 
 export class CaseRunner {
+  onCompleted?: (caseId:string)=>Promise<void>;
   private playbooks = new Map<string, Playbook>();
 
   private reconcilers = new Map<string, (caseId: string) => Promise<void>>();
@@ -149,6 +150,7 @@ export class CaseRunner {
     if(!verified) { await this.store.updateCase(caseId,{status:"verifying"}); return false; }
     await this.store.appendEvent(caseId,"case_completed",{summary});
     await this.store.updateCase(caseId,{status:"completed",wakeAt:null});
+    try{await this.onCompleted?.(caseId);}catch(error){log.error({caseId,error:String(error)},"experience capture deferred for repair");}
     return true;
   }
   private async advanceUnlocked(caseId: string): Promise<CaseStepOutcome> {
@@ -191,6 +193,11 @@ export class CaseRunner {
       }
 
       switch (kindOf(transition)) {
+        case "human": {
+          const t=transition as Extract<Transition,{waitingHuman:unknown}>;
+          await this.store.updateCase(caseId,{status:"waiting_human",wakeAt:t.waitingHuman.deadline});
+          return this.outcome((await this.store.getCase(caseId))!,false,ctx.pendingReplies);
+        }
         case "advance": {
           const t = transition as { to: string; context?: Record<string, unknown> };
           await this.store.updateCase(caseId, {
@@ -378,9 +385,10 @@ export function isResting(status: CaseRecord["status"]): boolean {
   );
 }
 
-function kindOf(t: Transition): "advance" | "ask" | "sleep" | "doubt" | "complete" | "fail" {
+function kindOf(t: Transition): "human" | "advance" | "ask" | "sleep" | "doubt" | "complete" | "fail" {
   // sleepBefore advance: a sleep transition may carry `to` (the resume state),
   // so the presence of `to` alone must not classify it as an advance.
+  if ("waitingHuman" in t) return "human";
   if ("sleepUntil" in t) return "sleep";
   if ("to" in t) return "advance";
   if ("askUser" in t) return "ask";
@@ -390,6 +398,7 @@ function kindOf(t: Transition): "advance" | "ask" | "sleep" | "doubt" | "complet
 }
 
 function summarize(t: Transition): Record<string, unknown> {
+  if ("waitingHuman" in t) return {waitingHuman:t.waitingHuman.taskId};
   if ("sleepUntil" in t) return { sleepUntil: t.sleepUntil.toISOString(), to: t.to };
   if ("to" in t) return { to: t.to };
   if ("askUser" in t) return { askUser: t.askUser.question };

@@ -435,13 +435,13 @@ export class PgCaseStore implements CaseStore {
   }
 
   async claimWake(id: string, now: Date): Promise<boolean> {
-    const result=await this.pool.query("UPDATE cases SET status='running', updated_at=now() WHERE id=$1 AND status='waiting_timeout' AND wake_at<=$2 RETURNING id",[id,now]);
+    const result=await this.pool.query("UPDATE cases SET status='running', updated_at=now() WHERE id=$1 AND status IN ('waiting_timeout','waiting_human') AND wake_at<=$2 RETURNING id",[id,now]);
     return !!result.rowCount;
   }
 
   async listWakeable(now: Date): Promise<CaseRecord[]> {
     const r = await this.pool.query(
-      `SELECT * FROM cases WHERE status = 'waiting_timeout' AND wake_at IS NOT NULL AND wake_at <= $1
+      `SELECT * FROM cases WHERE status IN ('waiting_timeout','waiting_human') AND wake_at IS NOT NULL AND wake_at <= $1
        ORDER BY wake_at LIMIT 50 FOR UPDATE SKIP LOCKED`,
       [now],
     );
@@ -677,13 +677,13 @@ export class InMemoryCaseStore implements CaseStore {
 
   async claimWake(id: string, now: Date): Promise<boolean> {
     const c=this.cases.get(id);
-    if(!c || c.status!=="waiting_timeout" || !c.wakeAt || c.wakeAt>now) return false;
+    if(!c || !["waiting_timeout","waiting_human"].includes(c.status) || !c.wakeAt || c.wakeAt>now) return false;
     c.status="running";c.updatedAt=new Date();return true;
   }
 
   async listWakeable(now: Date): Promise<CaseRecord[]> {
     return [...this.cases.values()].filter(
-      (c) => c.status === "waiting_timeout" && c.wakeAt != null && c.wakeAt <= now,
+      (c) => ["waiting_timeout","waiting_human"].includes(c.status) && c.wakeAt != null && c.wakeAt <= now,
     );
   }
 
@@ -703,5 +703,5 @@ export class InMemoryCaseStore implements CaseStore {
 }
 
 function is_open(s: CaseStatus): boolean {
-  return s === "running" || s === "waiting_user" || s === "waiting_timeout" || s === "in_doubt";
+  return s === "running" || s === "waiting_user" || s === "waiting_human" || s === "waiting_timeout" || s === "in_doubt";
 }

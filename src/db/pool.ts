@@ -19,7 +19,10 @@ export function getPool(): Pool | null {
   if (pool) return pool;
   const url = getConfig().DATABASE_URL;
   if (!url) return null;
-  pool = new Pool({ connectionString: url, max: 10 });
+  pool = new Pool({ connectionString: url, max: 10, connectionTimeoutMillis: 5000 });
+  // Idle connection loss must not become an unhandled EventEmitter error.
+  // Do not log connection strings or provider/database error details.
+  pool.on("error", () => log.error("idle database connection lost"));
   return pool;
 }
 

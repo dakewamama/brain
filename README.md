@@ -4,8 +4,9 @@ Axis is a policy-bounded execution runtime. External clients propose work; Axis
 resolves delegated authority, records durable Actions, enforces policy, and
 requires persisted evidence before declaring completion.
 
-This stacked draft targets `runtime/case-core`. See [validation and next-build
-strategy](docs/MCP-MILESTONE.md) for tested boundaries and provider limitations.
+This Experience draft targets `runtime/mcp-gateway`. See [execution and learning](docs/EXPERIENCE.md)
+for setup, promotion rules and validation boundaries, and the earlier
+[MCP checkpoint](docs/MCP-MILESTONE.md) for foundation limitations.
 This is an operator-provisioned execution slice, not a claim that every provider
 is production-ready.
 
@@ -24,6 +25,24 @@ is production-ready.
 - External SDK client integration tests covering native context access and the
   official filesystem MCP server, including compiled service restart and two-process
   execution. HTTP reference fixtures remain explicitly SANDBOX.
+
+## Experience milestone
+
+- One allowlisted Composio catalog adapter with connection ownership and health checks.
+- Playwright browser capabilities with scoped persistent sessions and observed postconditions.
+- Durable `WAITING_HUMAN` tasks, audited operator resolution and restart-safe resume.
+- Private parameterized Experience, operator-promoted Playbooks and compiled sequences.
+
+Validation: 173 tests passed against real PostgreSQL, with no skips. The external
+MCP acceptance flow used a Composio contract fixture and real sandbox Chromium.
+Its second run reused a Playbook: discovery searches fell from 1 to 0, with four
+Actions in both runs. Neither run called an LLM. Live Composio credentials remain
+unvalidated. See the [captured metrics](docs/EXPERIENCE-ACCEPTANCE.json).
+
+Current productionization evidence and remaining access-dependent checks are in
+[release gates](docs/RELEASE-GATES.md).
+
+Deployment package and the existing Railway service runbook: [deploy MCP](docs/DEPLOY-MCP.md).
 
 ## Run
 

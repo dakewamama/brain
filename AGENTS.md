@@ -1,10 +1,13 @@
-# Brain MCP branch checkpoint
+# Brain Experience branch checkpoint
 
 Apply the parent `/home/dake/Axis/AGENTS.md` and the user's latest instructions.
 This file supplements those rules; it does not authorize unrelated work.
 
-- Current implementation branch: `runtime/mcp-gateway`, stacked on
-  `runtime/case-core`. Keep both PRs draft and unmerged.
+- Current implementation branch: `runtime/experience-execution`, stacked on
+  `runtime/mcp-gateway`, itself stacked on `runtime/case-core`. Keep PRs draft and unmerged.
+- Read `docs/EXPERIENCE.md` for current learning/fallback semantics and limitations.
+  Composio validation uses contract fixtures; browser validation uses real sandbox Chromium.
+  Do not claim live credentials or model-call savings.
 - The user resumed after the milestone checkpoint. Read `docs/MCP-MILESTONE.md` before
   resuming; it records P0 gaps, validation boundaries and the next-build strategy.
 - Do not claim a completed production release. Do not expand capability breadth

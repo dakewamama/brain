@@ -1,0 +1,13 @@
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!tsconfig.json
+!src/
+!src/**
+!scripts/
+!scripts/copy-migrations.mjs
+!scripts/mcp-smoke.mjs
+**/.env*
+**/*.pem
+**/*.key
