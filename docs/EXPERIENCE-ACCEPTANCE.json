@@ -1,0 +1,32 @@
+{
+  "first": {
+    "level": "DISCOVERY",
+    "durationMs": 1219,
+    "plannerCalls": 0,
+    "executionSteps": 4,
+    "clockSkewDetected": false,
+    "capabilitySearches": 1,
+    "monotonicDurationMs": 1303
+  },
+  "second": {
+    "level": "PLAYBOOK",
+    "durationMs": 1004,
+    "plannerCalls": 0,
+    "executionSteps": 4,
+    "clockSkewDetected": false,
+    "capabilitySearches": 0,
+    "monotonicDurationMs": 1066
+  },
+  "compiled": {
+    "level": "COMPILED",
+    "durationMs": 1024,
+    "plannerCalls": 0,
+    "executionSteps": 4,
+    "clockSkewDetected": false,
+    "capabilitySearches": 0,
+    "monotonicDurationMs": 1089
+  },
+  "claim": "reduced capability rediscovery; no LLM was called in either run",
+  "vendor": "Composio adapter contract fixture; no live account configured",
+  "browser": "real Chromium local sandbox"
+}
