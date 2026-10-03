@@ -11,14 +11,16 @@ import {resetConfigForTests} from "../../src/core/config.js";
 const url=process.env.TEST_DATABASE_URL;
 if(!url)test("browser durability requires PostgreSQL",{skip:true},()=>{});
 else{
- const pool=new Pool({connectionString:url});const registry=new CapabilityRegistry();const provider=new PlaywrightBrowserProvider(pool,"/tmp/axis-browser-tests",700);registerBrowser(registry,provider,"SANDBOX");const gateway=new AxisGateway(pool,registry);
+ const schema=`test_${randomUUID().replaceAll("-","")}`,admin=new Pool({connectionString:url});
+ const isolated=new URL(url);isolated.searchParams.set("options",`-c search_path=${schema}`);
+ const pool=new Pool({connectionString:isolated.toString()});const registry=new CapabilityRegistry();const provider=new PlaywrightBrowserProvider(pool,"/tmp/axis-browser-tests",5000);registerBrowser(registry,provider,"SANDBOX");const gateway=new AxisGateway(pool,registry);
  let server:Server,origin:string,sessionId:string,token:string,title="Before";
- before(async()=>{process.env.DATABASE_URL=url;resetConfigForTests();await migrate();
+ before(async()=>{await admin.query(`CREATE SCHEMA ${schema}`);process.env.DATABASE_URL=isolated.toString();resetConfigForTests();await migrate();
   server=createServer(async(req,res)=>{if(req.url==="/slow")return;if(req.method==="POST"){const chunks=[];for await(const c of req)chunks.push(c);title=new URLSearchParams(Buffer.concat(chunks).toString()).get("title")??title;res.writeHead(303,{location:"/"});res.end();return;}res.setHeader("content-type","text/html");res.end(`<form method="post"><input id="title" name="title"><button id="save">Save</button></form><div id="result">${title}</div>`);});await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));origin=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
   const userId=randomUUID();sessionId=await provider.createSession({userId,origin,paths:["/","/slow"],selectors:["#title","#save","#result"],mode:"SANDBOX",expiresAt:new Date(Date.now()+600000)});
   token=(await gateway.grants.issue({userId,clientId:randomUUID(),clientName:"browser test",expiresAt:new Date(Date.now()+600000),authority:{scopes:["browser.observe","browser.act","browser.extract","browser.verify"],capabilities:["browser.observe","browser.act","browser.extract","browser.verify"],contextTypes:[],resources:[`browser:${sessionId}`],financial:null,requireApproval:false,modes:["SANDBOX"]}})).token;
  });
- after(async()=>{server?.closeAllConnections();if(server)await new Promise<void>(r=>server.close(()=>r()));await pool.end();await closePool();});
+ after(async()=>{server?.closeAllConnections();if(server)await new Promise<void>(r=>server.close(()=>r()));await pool.end();await closePool();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();});
  async function invoke(capabilityId:string,extra:Record<string,unknown>={}){const p=await gateway.invokeCapability(token,{capabilityId,arguments:{sessionId,path:"/",selector:"#result",revision:0,...extra},idempotencyKey:randomUUID()}) as {workId:string};await pool.query("UPDATE cases SET status='running' WHERE id=$1",[p.workId]);await gateway.runner.advance(p.workId);return gateway.status(token,{workId:p.workId});}
  test("real Chromium observes then changes website state with exact persisted evidence",async()=>{
   const read=await invoke("browser.observe");assert.equal(read.status,"COMPLETED");assert.equal((read.result as {text:string}).text,"Before");

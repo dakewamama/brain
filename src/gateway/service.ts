@@ -275,6 +275,7 @@ export class AxisGateway {
         await this.money(action.id,"IN_DOUBT");await this.store.updateActionStatus(action.id,"in_doubt");return {inDoubt:{reason:"Financial result lacks final proof"}};
       }
       await this.money(action.id,"SETTLED");await this.store.updateActionStatus(action.id,"settled",{...result});
+      if(descriptor.risk!=="read"&&(!result.targetState||!result.providerRef))return {complete:{summary:prep.proposal.understoodGoal}};
       return index<prep.proposal.actions.length-1?{to:"execute"}:{complete:{summary:prep.proposal.understoodGoal}};
     }
     if(result.outcome==="failed" && (descriptor.risk!=="financial" || ["RELEASED","REVERSED"].includes(result.moneyState??""))) {

@@ -9,7 +9,7 @@
     "build": "tsc && node scripts/copy-migrations.mjs",
     "start": "node dist/mcp/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts tests/cases/*.test.ts tests/gateway/*.test.ts",
+    "test": "tsx --test --test-concurrency=2 tests/*.test.ts tests/cases/*.test.ts tests/gateway/*.test.ts",
     "console": "tsx src/console.ts",
     "eval:planner": "tsx src/eval/run.ts",
     "admin": "tsx src/mcp/admin.ts",

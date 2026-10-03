@@ -10,6 +10,7 @@ import {CapabilityRegistry} from "../../src/capabilities/registry.js";
 import {registerExternalSource,type ExternalCapabilitySource} from "../../src/catalog/source.js";
 import {PlaywrightBrowserProvider,registerBrowser} from "../../src/browser/provider.js";
 import {HumanTaskService} from "../../src/human/service.js";
+import {ExperienceService} from "../../src/experience/service.js";
 import {AxisGateway} from "../../src/gateway/service.js";
 import {createMcpApp} from "../../src/mcp/server.js";
 import {migrate,closePool} from "../../src/db/pool.js";
@@ -40,6 +41,7 @@ else{
    const parameters={session:sessionId,path:"/",field:"#title",button:"#save",result:"#result",title:value,initialRevision:0,afterRevision:1,purpose:"Human review needed because this sandbox has no automated editorial approval"};
    const started=performance.now();
    const prep=await call("axis.prepare",{goal:"Update and verify a document with editorial review",constraints:{taskShape:"document_update_review_v1",parameters,...(steps?{steps}:{})}});
+   await gateway.experience.capture(String(prep.workId));assert.equal((await pool.query("SELECT 1 FROM experience_traces WHERE case_id=$1",[prep.workId])).rowCount,0,"unverified preparation cannot become Experience");
    await call("axis.execute",{preparationId:prep.preparationId});await gateway.runner.wakeDueCases(new Date(Date.now()+1000));
    const waiting=await call("axis.status",{workId:prep.workId});assert.equal(waiting.status,"WAITING_HUMAN");
    const restarted=new HumanTaskService(pool);await restarted.resolve(operator,String(waiting.actionId),{decision:"confirm",evidence:{reference:"sandbox-editorial-review",description:"Reviewed current sandbox document"}});
@@ -65,4 +67,15 @@ else{
   const metrics={first:first.trace.metrics,second:second.trace.metrics,compiled:fourth.trace.metrics,claim:"reduced capability rediscovery; no LLM was called in either run",vendor:"Composio adapter contract fixture; no live account configured",browser:"real Chromium local sandbox"};
   await writeFile('/tmp/axis-experience-acceptance.json',JSON.stringify(metrics,null,2));console.log(JSON.stringify(metrics));
  });
+ test("retrieval and promotion reject cross-user, missing scopes and changed schemas",async()=>{
+  const principal={userId:"another-user",clientId:"x",grantId:"x",expiresAt:new Date(Date.now()+60000),authority:{scopes:[],capabilities:[],contextTypes:[],resources:[],financial:null,requireApproval:false,modes:[]}};
+  await assert.rejects(gateway.experience.plan(principal,"document_update_review_v1",{}),/procedure_requires_discovery/);
+  await assert.rejects(gateway.experience.plan({...principal,userId},"document_update_review_v1",{}),/procedure_requires_discovery/);
+  const book=(await pool.query("SELECT id FROM experience_playbooks WHERE user_id=$1",[userId])).rows[0];const other=await human.issueOperator("other",new Date(Date.now()+60000));
+  await assert.rejects(gateway.experience.promote(other.token,book.id,"COMPILED"),/not_found/);
+  const changed=new CapabilityRegistry();for(const id of capabilities){const d=registry.get(id)!;changed.register({...d,version:"changed-schema-version"},{execute:async()=>{throw new Error("must not execute");}});}
+  const p={...principal,userId,authority:{...principal.authority,scopes:["documents.read",...capabilities],capabilities,resources:["catalog:composio:learning"],modes:["LIVE","SANDBOX"] as ("LIVE"|"SANDBOX")[]}};
+  await assert.rejects(new ExperienceService(pool,changed).plan(p,"document_update_review_v1",{}),/procedure_requires_discovery/);
+ });
+
 }

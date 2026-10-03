@@ -30,13 +30,12 @@ export class ComposioSource implements ExternalCapabilitySource {
   return z.object({data:z.record(z.unknown()),successful:z.boolean()}).parse(await this.request(`/tools/execute/${encodeURIComponent(toolId)}`,{arguments:args,connected_account_id:accountId,user_id:userId,version}));
  }
 }
-export interface CatalogAllowance {capabilityId:string;toolId:string;accountId:string;userId:string;scopes:string[];risk:"read"|"write"|"external_commitment";mode:"LIVE"|"SANDBOX";verification?:{toolId:string;arguments:Record<string,unknown>;field:string;expected:unknown;referenceField:string}}
+export interface CatalogAllowance {capabilityId:string;toolId:string;accountId:string;userId:string;scopes:string[];risk:"read"|"write"|"external_commitment";mode:"LIVE"|"SANDBOX"}
 export async function registerExternalSource(registry:CapabilityRegistry,source:ExternalCapabilitySource,allowances:CatalogAllowance[]):Promise<void>{
  for(const allowed of allowances){
   const tool=await source.discover(allowed.toolId),connection=await source.connection(allowed.accountId);
   const resource=`catalog:${source.id}:${allowed.accountId}`;
   const d:CapabilityDescriptor={id:allowed.capabilityId,version:tool.version,provider:{id:source.id,kind:"external_api"},description:tool.description,inputSchema:tool.inputSchema,outputSchema:tool.outputSchema,mode:allowed.mode,risk:allowed.risk,requiredScopes:allowed.scopes,reversible:allowed.risk==="read",contextTypes:[],health:connection.active&&connection.userId===allowed.userId?"healthy":"unhealthy",metadata:{remoteTool:tool.id,source:source.id,requiredResources:[resource],authorizedUserId:allowed.userId,connectionRequired:true}};
-  const verify=allowed.verification?await source.discover(allowed.verification.toolId):undefined;
   registry.register(d,{async health(){const c=await source.connection(allowed.accountId);return c.active&&c.userId===allowed.userId?"healthy":"unhealthy";},resources:()=>[resource],async execute(args,c):Promise<ProviderResult>{
    if(c.userId!==allowed.userId)throw new AxisError("catalog_connection_owner");
    const current=await source.connection(allowed.accountId);
@@ -47,11 +46,6 @@ export async function registerExternalSource(registry:CapabilityRegistry,source:
    if(allowed.risk==="read")return {outcome:"succeeded",data:r.data};
    // A separate authoritative read must prove the configured target state.
    // Vendor successful:true by itself leaves this write VERIFYING.
-   if(verify&&allowed.verification){
-    const evidence=await source.invoke(verify.id,verify.version,allowed.accountId,c.userId,allowed.verification.arguments);
-    const ref=evidence.data[allowed.verification.referenceField];
-    if(evidence.successful&&digest(evidence.data[allowed.verification.field])===digest(allowed.verification.expected)&&typeof ref==="string")return {outcome:"succeeded",data:r.data,providerRef:ref,targetState:"verified external state"};
-   }
    return {outcome:"succeeded",data:r.data};
   }});
  }

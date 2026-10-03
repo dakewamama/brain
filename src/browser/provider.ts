@@ -25,6 +25,7 @@ export class PlaywrightBrowserProvider implements BrowserProvider {
   try{
    await db.query("BEGIN");const r=await db.query("SELECT * FROM browser_sessions WHERE id=$1 AND user_id=$2 FOR UPDATE",[input.sessionId,c.userId]);const s=r.rows[0] as Session|undefined;
    if(!s||s.disabled||new Date(s.expires_at)<=new Date())throw new AxisError("browser_session_unavailable");
+   if(c.executionMode && s.mode!==c.executionMode)throw new AxisError("browser_mode_mismatch");
    if(s.mode==="SANDBOX"&&process.env.NODE_ENV==="production")throw new AxisError("sandbox_browser_forbidden");
    if(s.revision!==input.revision)throw new AxisError("stale_browser_session");
    if(!s.paths.includes(input.path)||![input.selector,input.clickSelector,input.verifySelector].filter(Boolean).every(v=>s.selectors.includes(v!)))throw new AxisError("browser_surface_not_allowed");
@@ -32,7 +33,7 @@ export class PlaywrightBrowserProvider implements BrowserProvider {
    const browser=await chromium.launchPersistentContext(s.profile_path,{headless:true,acceptDownloads:false,serviceWorkers:"block"});
    try{
     await browser.route("**/*",route=>{
-     const u=new URL(route.request().url());return u.origin===s.origin?route.continue():route.abort("blockedbyclient");
+     const request=route.request(),u=new URL(request.url());return u.origin===s.origin&&(!request.isNavigationRequest()||s.paths.includes(u.pathname+u.search))?route.continue():route.abort("blockedbyclient");
     });
     const page=await browser.newPage();page.setDefaultTimeout(this.timeoutMs);page.setDefaultNavigationTimeout(this.timeoutMs);
     await page.goto(url.href,{waitUntil:"domcontentloaded"});

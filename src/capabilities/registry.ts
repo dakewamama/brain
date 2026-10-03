@@ -26,7 +26,7 @@ export interface ProviderResult {
   moneyState?: MoneyState;
 }
 export interface ProviderContext {
-  actionId: string; idempotencyKey: string; userId: string; grantId?: string; clientId?: string; context: readonly ContextItem[];
+  actionId: string; idempotencyKey: string; userId: string; grantId?: string; clientId?: string; executionMode?: CapabilityDescriptor["mode"]; context: readonly ContextItem[];
 }
 export interface CapabilityAdapter {
   health?():Promise<"healthy"|"unhealthy">;
@@ -114,7 +114,7 @@ export class CapabilityRegistry {
       const e=this.entries.get(id)!;
       if(e.descriptor.mode === "UNAVAILABLE" || e.descriptor.health !== "healthy") throw new AxisError("capability_unavailable");
       if(requery && !e.adapter.requery) return {outcome:"unknown",data:{}};
-      const result=await (requery ? e.adapter.requery!(args,ctx) : e.adapter.execute(args,ctx));
+      const result=await (requery ? e.adapter.requery!(args,{...ctx,executionMode:e.descriptor.mode}) : e.adapter.execute(args,{...ctx,executionMode:e.descriptor.mode}));
       if(!e.output(result.data)) throw new AxisError("invalid_provider_output");
       return result;
     };
