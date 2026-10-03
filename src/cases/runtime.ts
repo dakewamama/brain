@@ -80,6 +80,7 @@ export interface CapabilityExecutor {
 const MAX_HOPS = 20;
 
 export class CaseRunner {
+  onCompleted?: (caseId:string)=>Promise<void>;
   private playbooks = new Map<string, Playbook>();
 
   private reconcilers = new Map<string, (caseId: string) => Promise<void>>();
@@ -149,6 +150,7 @@ export class CaseRunner {
     if(!verified) { await this.store.updateCase(caseId,{status:"verifying"}); return false; }
     await this.store.appendEvent(caseId,"case_completed",{summary});
     await this.store.updateCase(caseId,{status:"completed",wakeAt:null});
+    try{await this.onCompleted?.(caseId);}catch(error){log.error({caseId,error:String(error)},"experience capture deferred for repair");}
     return true;
   }
   private async advanceUnlocked(caseId: string): Promise<CaseStepOutcome> {

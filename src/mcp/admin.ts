@@ -1,3 +1,5 @@
+import {configuredCapabilities} from "./capabilities.js";
+import {ExperienceService} from "../experience/service.js";
 import {HumanTaskService} from "../human/service.js";
 import {PlaywrightBrowserProvider} from "../browser/provider.js";
 /** Local trusted operator interface. No administration or approval tools are exposed through MCP. */
@@ -32,6 +34,11 @@ async function main():Promise<void>{
  }else if(command==="browser-session"){
   const i=z.object({userId:z.string(),origin:z.string().url(),paths:z.array(z.string()),selectors:z.array(z.string()),mode:z.enum(["LIVE","SANDBOX"]),expiresAt:z.string().datetime()}).strict().parse(raw);
   if(!process.env.AXIS_BROWSER_PROFILE_DIR)throw new Error("AXIS_BROWSER_PROFILE_DIR required");console.log(await new PlaywrightBrowserProvider(pool,process.env.AXIS_BROWSER_PROFILE_DIR).createSession({...i,expiresAt:new Date(i.expiresAt)}));
+ }else if(command==="experience-list"||command==="experience-promote"){
+  const token=process.env.AXIS_OPERATOR_TOKEN;if(!token)throw new Error("AXIS_OPERATOR_TOKEN required");
+  const {registry}=await configuredCapabilities(pool);const service=new ExperienceService(pool,registry);
+  if(command==="experience-list")console.log(JSON.stringify(await service.list(token)));
+  else {const i=z.object({playbookId:z.string(),stage:z.enum(["VERIFIED","PROVEN","COMPILED_CANDIDATE","COMPILED"])}).strict().parse(raw);await service.promote(token,i.playbookId,i.stage);}
  }else throw new Error("unknown operator command");
 }
 main().catch(error=>{console.error(error instanceof Error?error.message:"operator command failed");process.exitCode=1;}).finally(closePool);
